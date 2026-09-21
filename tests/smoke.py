@@ -214,11 +214,18 @@ def test_server():
                   'name="codepath"' not in html and 'id="codepath"' not in html)
         except Exception as ex:
             check("화면이 나온다", False, str(ex))
-        try:
-            st, _ = srv.get("/static/app.js", 5)
-            check("정적 파일이 서빙된다", st == 200, f"status {st}")
-        except Exception as ex:
-            check("정적 파일이 서빙된다", False, str(ex))
+        for path in ("/static/app.js", "/static/maker-ui.css", "/static/style.css",
+                     "/static/fonts/pretendard.css",
+                     "/static/fonts/woff2-dynamic-subset/PretendardVariable.subset.0.woff2",
+                     "/static/img/favicon.png", "/static/img/pibo-logo.png",
+                     "/static/img/pibo-hello.png", "/favicon.ico"):
+            try:
+                st, _ = srv.get(path, 5)
+                check(f"서빙 {path}", st == 200, f"status {st}")
+            except Exception as ex:
+                check(f"서빙 {path}", False, str(ex))
+        check("화면이 학습지 테마를 부른다", 'maker-ui.css' in html and 'fonts/pretendard.css' in html)
+        check("파이보 얼굴 파비콘", 'img/favicon.png' in html)
 
 
 def main() -> int:

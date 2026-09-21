@@ -49,7 +49,12 @@ def main() -> int:
                 fails.append("frozen")
 
             # static 이 번들에 안 들어갔으면 여기서 걸린다
-            for path, want in (("/", "pibo-connector"), ("/static/app.js", "")):
+            # static 이 번들에 안 들어갔으면 여기서 걸린다. 폰트·이미지까지 본다.
+            for path, want in (("/", "pibo-connector"), ("/static/app.js", ""),
+                               ("/static/maker-ui.css", "--paper"),
+                               ("/static/fonts/pretendard.css", "Pretendard"),
+                               ("/static/fonts/woff2-dynamic-subset/PretendardVariable.subset.0.woff2", ""),
+                               ("/static/img/pibo-logo.png", ""), ("/favicon.ico", "")):
                 try:
                     st, body = srv.get(path, 8)
                     if st != 200 or (want and want not in body):

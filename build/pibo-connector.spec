@@ -25,7 +25,7 @@ from PyInstaller.utils.hooks import collect_submodules
 ROOT = Path(os.path.abspath(SPECPATH)).parent
 STATIC = ROOT / "pibo_connector" / "static"
 EXAMPLES = ROOT / "examples"
-ICON = ROOT / "build" / "pibo-connector.ico"    # build/make_icon.py 가 만든다
+ICON = ROOT / "build" / "pibo-connector.ico"    # sense-lab 의 파이보 얼굴 (tools/portable/icon.ico) 그대로
 
 for d in (STATIC, EXAMPLES):
     if not d.is_dir():

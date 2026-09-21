@@ -46,8 +46,14 @@ python run.py --host 0.0.0.0     # 다른 기기에서도 열기 (이때는 토�
 
 ## 쓰는 순서
 
-화면 문구는 초등 수업 기준으로 쉽게 썼다. 밝은 테마/어두운 테마를 따라가고
-(프로젝터엔 밝은 쪽), 오른쪽 위에서 바꿀 수 있다. 영어는 `?lang=en`.
+화면은 **더 메이커 공통 "학습지" 테마**다 — `sense-lab/design/maker-ui.css` 를
+`static/maker-ui.css` 로 그대로 복사해 쓰고, 이 서비스 전용 스타일(`static/style.css`)은
+그 토큰만 쓴다. 미색 종이 바탕, 갈색 괘선 헤더, 남색 펜, 명조 서비스명, Pretendard
+셀프호스팅(오프라인용으로 exe 에 같이 묶인다). 어두운 테마는 없다 — 규격이 단일 톤이다.
+문구는 초등 수업 기준(해요체, 짧게). 영어는 `?lang=en`.
+
+테마를 바꾸려면 sense-lab 쪽 `maker-ui.css` 를 고친 뒤 여기로 다시 복사한다.
+`style.css` 는 손대지 않아도 된다.
 
 1. **[로봇 찾기]** — 교실 네트워크의 `.1~.254` 를 훑는다. 15대면 보통 3~8초
 2. **출석 확인** — 우리 반 로봇 번호(가슴의 8자리)를 출석부에 적으면
@@ -193,10 +199,11 @@ pyinstaller build/pibo-connector.spec --noconfirm
 # dist/pibo-connector(.exe)
 ```
 
-`static/` 과 `examples/` 는 spec 의 `datas` 로 같이 묶인다 — `config.py` 가
-보는 자리(`_MEIPASS/static`, `_MEIPASS/examples`)와 정확히 맞아야 하고,
-`tests/smoke.py` 가 그걸 확인한다. 윈도우 아이콘은 `build/make_icon.py` 가
-의존성 없이 만든 `build/pibo-connector.ico` 다.
+`static/`(테마·폰트·이미지 포함, 약 3.4MB) 과 `examples/` 는 spec 의 `datas` 로
+같이 묶인다 — `config.py` 가 보는 자리(`_MEIPASS/static`, `_MEIPASS/examples`)와
+정확히 맞아야 하고, `tests/smoke.py` 와 `tests/exe_smoke.py` 가 폰트·이미지까지
+실제로 서빙되는지 확인한다. 윈도우 아이콘 `build/pibo-connector.ico` 는
+sense-lab 의 파이보 얼굴(`tools/portable/icon.ico`) 그대로다.
 
 CI 가 같은 스펙으로 빌드한다. `main` push 는 `nightly` 를, `v*` 태그는 정식
 릴리스를 만든다 (`.github/workflows/release.yml`).

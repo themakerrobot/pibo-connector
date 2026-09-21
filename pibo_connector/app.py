@@ -90,7 +90,8 @@ def create_app(token: str = "") -> FastAPI:
 
     @app.get("/favicon.ico")
     async def favicon():
-        path = static / "favicon.svg"
+        # sense-lab 과 같은 파이보 얼굴 (static/img/favicon.png)
+        path = static / "img" / "favicon.png"
         if path.exists():
             return FileResponse(str(path))
         return JSONResponse({}, status_code=404)
