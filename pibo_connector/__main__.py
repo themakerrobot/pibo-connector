@@ -1,4 +1,4 @@
-"""진입점. 소스로도 exe 로도 같은 경로로 뜬다.
+"""진입점. 소스로도 실행 파일로도 같은 경로로 뜬다.
 
     python -m pibo_connector          # 소스 실행
     pibo-connector.exe                # 파이썬 없는 노트북
@@ -17,6 +17,20 @@ import webbrowser
 from . import __version__, config
 
 
+def _utf8_console() -> None:
+    """윈도우 콘솔이 cp1252/cp949 여도 한글 출력에 죽지 않게 한다.
+
+    영어권 윈도우의 기본 코드페이지는 cp1252 다. 여기에 한글을 찍으면
+    UnicodeEncodeError 로 프로세스가 통째로 끝난다 — 실행 파일이 첫 줄에서
+    죽는다는 뜻이다. errors='replace' 로 물러나게 해둔다.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def _free_port(host: str, port: int) -> int:
     """그 포트가 막혀 있으면 다음 빈 포트를 찾는다."""
     for p in range(port, port + 20):
@@ -32,6 +46,8 @@ def _free_port(host: str, port: int) -> int:
 
 
 def main(argv=None) -> int:
+    _utf8_console()
+
     ap = argparse.ArgumentParser(
         prog="pibo-connector",
         description="파이보/파이브레인 다대수 제어 — 브라우저 한 장으로 찾고 실행한다")
@@ -64,11 +80,18 @@ def main(argv=None) -> int:
     if token:
         print(f"  토큰  : {token}   (--host {args.host} 이라 토큰이 필요하다)")
     print("  종료  : Ctrl+C")
+    sys.stdout.flush()
+
+    try:
+        app = create_app(token)
+    except Exception as ex:
+        print(f"!! 서버를 만들지 못했다: {ex}")
+        return 1
 
     if not args.no_browser:
         threading.Timer(1.0, lambda: _open(url)).start()
 
-    uvicorn.run(create_app(token), host=args.host, port=port, log_level="warning",
+    uvicorn.run(app, host=args.host, port=port, log_level="warning",
                 access_log=False)
     return 0
 

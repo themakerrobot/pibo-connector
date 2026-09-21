@@ -50,7 +50,7 @@ jobs:
       - name: 빌드
         run: pyinstaller build/pibo-connector.spec --noconfirm
       - name: 실제로 뜨는지 (이걸 통과해야 올린다)
-        run: python tests/exe_smoke.py ${{ matrix.built }} --port 8912 --timeout 120
+        run: python -m tests.exe_smoke ${{ matrix.built }} --timeout 150
       - name: 이름 붙이기
         shell: bash
         run: |

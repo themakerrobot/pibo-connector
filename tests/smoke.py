@@ -13,11 +13,8 @@
 
 import ast
 import json
-import subprocess
 import sys
 import tempfile
-import time
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 
 from pibo_connector import config, detect, robot, runner, scan   # noqa: E402
 from pibo_connector.store import Fleet                           # noqa: E402
+from tests._launch import Server, utf8_console                   # noqa: E402
 
 FAIL = []
 
@@ -129,49 +127,60 @@ def test_wrap():
     check("중괄호가 든 코드도 통과", ok2)
 
 
+def test_spec_paths():
+    """spec 이 정적 파일을 푸는 자리와 config.static_dir() 이 보는 자리가 같은가.
+
+    이게 어긋나면 소스 실행은 멀쩡한데 묶은 실행 파일만 StaticFiles 에서
+    'Directory does not exist' 로 죽는다. 실제로 한 번 그랬다.
+    """
+    print("실행 파일 번들 경로")
+    spec = (ROOT / "build" / "pibo-connector.spec").read_text(encoding="utf-8")
+    # frozen 일 때 static_dir() 은 sys._MEIPASS / 'static' 이다.
+    # 그러므로 datas 의 대상도 'static' 이어야 한다.
+    check("spec 의 datas 대상이 'static'",
+          'datas=[(str(STATIC), "static")]' in spec,
+          [l for l in spec.splitlines() if "datas=" in l])
+    check("static_dir 이 resource_dir 바로 아래",
+          config.static_dir().name == "static"
+          and config.static_dir().parent == config.resource_dir())
+    check("정적 파일이 실제로 있다",
+          (config.static_dir() / "index.html").exists()
+          and (config.static_dir() / "app.js").exists())
+
+
 def test_server():
+    """소스 실행이 실제로 뜨는지. 포트는 고정으로 가정하지 않는다 —
+    _free_port 가 막힌 포트를 피해 옮기므로 서버가 찍는 주소를 읽는다."""
     print("서버 기동")
-    port = 8911
-    p = subprocess.Popen(
-        [sys.executable, str(ROOT / "run.py"), "--no-browser", "--port", str(port)],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=str(ROOT))
-    try:
-        info = None
-        for _ in range(40):
-            time.sleep(0.5)
-            if p.poll() is not None:
-                break
-            try:
-                with urllib.request.urlopen(
-                        f"http://127.0.0.1:{port}/api/info", timeout=2) as r:
-                    info = json.loads(r.read().decode())
-                    break
-            except Exception:
-                continue
+    log = Path(tempfile.gettempdir()) / "smoke_server.log"
+    with Server([sys.executable, str(ROOT / "run.py"), "--no-browser"],
+                log, cwd=str(ROOT)) as srv:
+        info, died = srv.wait_ready(60.0)
         check("/api/info 가 200", info is not None,
-              (p.stdout.read() if p.poll() is not None else "기동 안 됨"))
-        if info:
-            check("codepath 고정", info["codepath"] == config.CODEPATH, info["codepath"])
-            check("트리거 포트", info["trigger_port"] == config.TRIG_PORT)
+              (f"exit {srv.proc.returncode}" if died else "기동 안 됨")
+              + " — " + srv.log().strip()[-500:])
+        if not info:
+            return
+        check("codepath 고정", info["codepath"] == config.CODEPATH, info["codepath"])
+        check("트리거 포트", info["trigger_port"] == config.TRIG_PORT)
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as r:
-                html = r.read().decode()
-            check("화면이 나온다", "pibo-connector" in html)
+            st, html = srv.get("/", 5)
+            check("화면이 나온다", st == 200 and "pibo-connector" in html)
             # codepath 를 UI 에 노출하지 않는다 (executeb 에 is_protect 가 없다)
             check("화면에 codepath 입력칸이 없다", "/home/pi/code" not in html)
         except Exception as ex:
             check("화면이 나온다", False, str(ex))
-    finally:
-        p.terminate()
         try:
-            p.wait(timeout=10)
-        except Exception:
-            p.kill()
+            st, _ = srv.get("/static/app.js", 5)
+            check("정적 파일이 서빙된다", st == 200, f"status {st}")
+        except Exception as ex:
+            check("정적 파일이 서빙된다", False, str(ex))
 
 
 def main() -> int:
+    utf8_console(sys.stdout, sys.stderr)
     for fn in (test_parse_system, test_detect, test_store, test_ap_rx,
-               test_wrap, test_server):
+               test_wrap, test_spec_paths, test_server):
         fn()
     print()
     if FAIL:

@@ -47,7 +47,7 @@ jobs:
           pip install -r requirements.txt pyinstaller
       - run: pyinstaller build/pibo-connector.spec --noconfirm
       - name: 묶은 실행 파일이 실제로 뜨는지
-        run: python tests/exe_smoke.py ${{ matrix.built }} --port 8912 --timeout 120
+        run: python -m tests.exe_smoke ${{ matrix.built }} --timeout 150
       - uses: actions/upload-artifact@v4
         with:
           name: pibo-connector-${{ matrix.os }}

@@ -67,6 +67,12 @@ def create_app(token: str = "") -> FastAPI:
     app.state.token = token
 
     static = config.static_dir()
+    if not static.is_dir():
+        # 묶인 실행 파일이라면 빌드가 잘못된 것이다 (spec 의 datas 대상 확인).
+        raise RuntimeError(
+            f"정적 파일 디렉토리가 없다: {static}"
+            + ("  (실행 파일 빌드 문제다 — build/pibo-connector.spec 의 datas 확인)"
+               if config.frozen() else ""))
     app.mount("/static", StaticFiles(directory=str(static)), name="static")
 
     def check(request: Request) -> None:
