@@ -64,6 +64,32 @@ jobs:
         run: pyinstaller build/pibo-connector.spec --noconfirm
       - name: 실제로 뜨는지 (이걸 통과해야 올린다)
         run: python -m tests.exe_smoke ${{ matrix.built }} --timeout 150
+
+      # ── 윈도우 코드 서명 (인증서 secret 이 있을 때만) ──
+      # 서명이 없으면 Windows 가 파일 해시 평판으로 SmartScreen 경고를 띄우고,
+      # Windows 11 스마트 앱 컨트롤은 아예 실행을 막는다. 빌드마다 해시가 바뀌어
+      # 평판도 매번 0 부터다. 서명하면 둘 다 풀린다.
+      #   WIN_CERT_PFX_B64  : 코드 서명 인증서(.pfx) 를 base64 로 (certutil -encode / base64 -w0)
+      #   WIN_CERT_PASSWORD : 그 pfx 비밀번호
+      # 둘 다 없으면 이 단계는 건너뛴다 — 지금처럼 서명 없이 올라간다.
+      - name: 코드 서명 (인증서가 있을 때만)
+        if: runner.os == 'Windows' && env.HAS_CERT == 'true'
+        env:
+          HAS_CERT: ${{ secrets.WIN_CERT_PFX_B64 != '' && secrets.WIN_CERT_PASSWORD != '' }}
+          PFX_B64: ${{ secrets.WIN_CERT_PFX_B64 }}
+          PFX_PASS: ${{ secrets.WIN_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+                      Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          & $signtool sign /f $pfx /p $env:PFX_PASS /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+                     /d "pibo-connector" "${{ matrix.built }}"
+          if ($LASTEXITCODE -ne 0) { throw "서명 실패" }
+          & $signtool verify /pa /v "${{ matrix.built }}"
+          if ($LASTEXITCODE -ne 0) { throw "서명 검증 실패" }
+          Remove-Item $pfx -Force
       - name: 이름 붙이기
         shell: bash
         run: |
