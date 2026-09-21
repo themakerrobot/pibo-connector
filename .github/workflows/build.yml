@@ -1,0 +1,58 @@
+name: build
+
+# 소스가 도는지, exe 로 묶이는지를 push 마다 본다.
+# 실제 배포는 release.yml 이 맡는다.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 의존성
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 문법
+        run: python -m compileall -q pibo_connector run.py
+      - name: 검증 (파싱·판별·PSK 유출·래퍼·서버 기동)
+        run: python -m tests.smoke
+
+  exe:
+    needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - run: pyinstaller build/pibo-connector.spec --noconfirm
+      - name: exe 가 실제로 뜨는지
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist/pibo-connector.exe `
+               -ArgumentList "--no-browser","--port","8912" -PassThru
+          Start-Sleep -Seconds 12
+          try {
+            $r = Invoke-WebRequest -Uri http://127.0.0.1:8912/api/info -UseBasicParsing -TimeoutSec 10
+            if ($r.StatusCode -ne 200) { throw "status $($r.StatusCode)" }
+            Write-Host $r.Content
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pibo-connector-windows
+          path: dist/pibo-connector.exe
+          retention-days: 14

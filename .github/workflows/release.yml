@@ -1,0 +1,109 @@
+name: release
+
+# exe 자동 배포.
+#   - v* 태그를 밀면  → 그 태그로 정식 릴리스
+#   - main 에 push    → 'nightly' 선릴리스를 덮어쓴다 (항상 최신 exe 가 한 주소에)
+#   - 수동 실행       → 태그 이름을 직접 줘서 다시 올린다
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "릴리스 태그 (비우면 nightly)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: pibo-connector-windows.exe
+            built: dist/pibo-connector.exe
+          - os: ubuntu-latest
+            asset: pibo-connector-linux
+            built: dist/pibo-connector
+          - os: macos-latest
+            asset: pibo-connector-macos
+            built: dist/pibo-connector
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 의존성
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: 빌드
+        run: pyinstaller build/pibo-connector.spec --noconfirm
+      - name: 이름 붙이기
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "${{ matrix.built }}" "out/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: 한곳에 모으기
+        run: |
+          mkdir -p out
+          find art -type f -exec cp {} out/ \;
+          ls -la out
+      - name: 태그 정하기
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "pre=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "pre=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=nightly" >> "$GITHUB_OUTPUT"
+            echo "pre=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: nightly 는 매번 덮어쓴다
+        if: steps.tag.outputs.name == 'nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete nightly --cleanup-tag --yes || true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          prerelease: ${{ steps.tag.outputs.pre }}
+          generate_release_notes: ${{ steps.tag.outputs.pre == 'false' }}
+          body: |
+            파이썬 없는 노트북에서 그대로 실행된다. 받아서 더블클릭하면 브라우저가 열린다.
+
+            | 노트북 | 받을 파일 |
+            |---|---|
+            | Windows | `pibo-connector-windows.exe` |
+            | Linux | `pibo-connector-linux` (`chmod +x` 후 실행) |
+            | macOS | `pibo-connector-macos` (`chmod +x`, 첫 실행은 우클릭 → 열기) |
+
+            소스로 돌리려면: `pip install -r requirements.txt && python run.py`
+
+            커밋 `${{ github.sha }}`
+          files: out/*

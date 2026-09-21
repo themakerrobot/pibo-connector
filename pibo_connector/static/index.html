@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pibo-connector</title>
+<link rel="icon" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <span class="dot" id="conn" title="연결 상태"></span>
+  <h1>pibo-connector</h1>
+  <span class="ver" id="ver"></span>
+  <span class="spacer"></span>
+  <button class="small" id="lang">EN</button>
+</header>
+
+<main>
+
+  <!-- 1. 찾기 -->
+  <section>
+    <h2 data-t="find">찾기</h2>
+    <div class="row">
+      <input type="text" id="subnet" size="14" placeholder="192.168.0">
+      <button class="primary" id="btn-scan" data-t="scan">찾기</button>
+      <button id="btn-refresh" data-t="refresh">다시 확인</button>
+      <button id="btn-apscan" data-t="apscan">AP 모드 찾기</button>
+      <span class="note" id="scan-msg"></span>
+    </div>
+    <div class="bar"><i id="scan-bar"></i></div>
+    <div class="row">
+      <span class="note" data-t="find_note">서브넷의 .1~.254 를 훑는다. 15대면 보통 3~8초.</span>
+    </div>
+  </section>
+
+  <!-- 2. 점호 -->
+  <section>
+    <h2 data-t="roster">점호</h2>
+    <div class="roster" id="roster-sum"></div>
+    <details>
+      <summary data-t="roster_edit">기대 SN 목록 편집</summary>
+      <textarea id="roster-text" rows="3"
+                placeholder="cd488e95 1a2b3c4d ..."></textarea>
+      <div class="row" style="margin-top:6px">
+        <button class="small" id="btn-roster" data-t="save">저장</button>
+        <span class="note" data-t="roster_note">8자리 SN 만 골라낸다. 줄바꿈·쉼표·공백 아무거나 써도 된다.</span>
+      </div>
+    </details>
+  </section>
+
+  <!-- 3. 목록 -->
+  <section>
+    <h2 data-t="list">목록</h2>
+    <div class="row" style="margin-bottom:8px">
+      <label class="chk"><input type="checkbox" id="chk-all"> <span data-t="select_all">전체 선택</span></label>
+      <span class="note" id="sel-count"></span>
+      <span class="spacer"></span>
+      <button class="small" id="btn-export" data-t="export">내보내기</button>
+      <button class="small" id="btn-import" data-t="import">가져오기</button>
+      <button class="small" id="btn-rules" data-t="rules">판별 규칙</button>
+    </div>
+    <table>
+      <thead><tr>
+        <th style="width:28px"></th>
+        <th data-t="kind">기종</th>
+        <th class="mono" data-t="sn">SN</th>
+        <th data-t="name">이름</th>
+        <th class="mono" data-t="ip">IP</th>
+        <th class="mono hide-s" data-t="os">OS_VERSION</th>
+        <th class="mono hide-s" data-t="temp">온도</th>
+        <th data-t="status">상태</th>
+        <th class="hide-s" data-t="seen">마지막 확인</th>
+        <th style="width:28px"></th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <p class="note" id="empty" data-t="empty">아직 찾은 로봇이 없다. [찾기] 를 눌러라.</p>
+  </section>
+
+  <!-- 4. 코드 -->
+  <section>
+    <h2 data-t="code">코드</h2>
+    <textarea id="code" rows="12" spellcheck="false">print('hello')
+</textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" id="btn-run" data-t="run">실행</button>
+      <button id="btn-sync" data-t="sync">동시 실행</button>
+      <button class="danger" id="btn-stop" data-t="stop">정지</button>
+      <select id="codetype">
+        <option value="python">python</option>
+        <option value="shell">shell</option>
+      </select>
+      <input type="file" id="file" accept=".py,.sh,.txt" style="max-width:190px">
+      <span class="spacer"></span>
+      <span class="note" id="run-msg"></span>
+    </div>
+    <p class="warn" data-t="warn_shared">⚠ 실행하면 로봇의 tools · classify · llama-server 가 멈춘다. LLM 코드는 Dialog.start_llm 부터 할 것. IDE 의 출력창은 전역이라 교사 브라우저에도 같이 찍히고, 누가 IDE 에서 Run 을 누르면 이 코드가 죽는다.</p>
+    <p class="note" data-t="warn_sync">동시 실행: 무거운 import 를 먼저 끝내게 해두고 전부 준비되면 UDP 트리거로 동시에 푼다. 코드를 <span class="kbd"># --- GO ---</span> 한 줄로 나누면 위가 준비, 아래가 본편이다. 공유기가 브로드캐스트를 막으면 트리거가 안 가고 <span class="kbd">[timeout]</span> 으로 끝난다.</p>
+  </section>
+
+  <!-- 5. 출력 -->
+  <section>
+    <h2 data-t="output">출력</h2>
+    <div class="out" id="out"></div>
+    <p class="note" id="out-empty" data-t="out_empty">실행하면 로봇별 마지막 줄이 여기에 뜬다. 줄을 누르면 전체 로그가 펼쳐진다.</p>
+  </section>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

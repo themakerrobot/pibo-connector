@@ -1,0 +1,207 @@
+"""로봇 한 대와의 통신. 로봇에는 아무것도 설치하지 않는다.
+
+쓰는 것은 OS 가 이미 띄워둔 두 서버뿐이다.
+  :80   ide/run_ide.py   socket.io — init / executeb / update / stop
+  :8080 system/booting.py HTTP     — /wifi, /wifi_scan, /device/{pkt}
+"""
+
+import asyncio
+import contextlib
+from typing import Any, Callable, Dict, List, Optional
+
+import aiohttp
+import socketio
+from yarl import URL
+
+from . import config, detect
+
+
+# ── HTTP (:8080) ──────────────────────────────────────────────────────
+async def is_alive(session: aiohttp.ClientSession, ip: str,
+                   timeout: float = 1.5) -> bool:
+    """:8080/wifi 가 {"result":"ok"} 를 주면 파이보 계열이다.
+
+    ⚠ 이 응답에는 WiFi 비밀번호(psk)가 평문으로 들어 있다 (booting.py).
+    result 만 보고 나머지는 즉시 버린다. 호출자에게 돌려주지 않는다.
+    """
+    try:
+        async with session.get(f"http://{ip}:{config.SYS_PORT}/wifi",
+                               timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+            if r.status != 200:
+                return False
+            d = await r.json(content_type=None)
+            return isinstance(d, dict) and d.get("result") == "ok"
+    except Exception:
+        return False
+    # 여기서 d 는 스코프를 벗어나 GC 된다. 어디에도 남기지 않는다.
+
+
+async def device_probe(session: aiohttp.ClientSession, ip: str,
+                       timeout: float = 2.0) -> Optional[str]:
+    """GET /device/#40:! — device 보드 시스템 패킷. 기종 보조 판별용."""
+    try:
+        # '#40:!' 를 경로에 그대로 넣으면 '#' 이 프래그먼트로 잘린다.
+        # 미리 인코딩한 뒤 yarl 에 encoded=True 로 넘겨 재인코딩을 막는다.
+        url = URL(f"http://{ip}:{config.SYS_PORT}/device/%2340%3A%21", encoded=True)
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+            return str(await r.json(content_type=None))
+    except Exception:
+        return None
+
+
+async def remote_wifi_scan(session: aiohttp.ClientSession, ip: str,
+                           timeout: float = 20.0) -> List[dict]:
+    """붙어 있는 로봇에게 주변 WiFi 를 스캔시킨다.
+
+    ⚠ wifi.py 의 nmcli 에 --rescan 이 없다. 캐시된 결과라 오래됐을 수 있다.
+    화면에 '참고용' 이라고 적어 둘 것.
+    """
+    try:
+        async with session.get(f"http://{ip}:{config.SYS_PORT}/wifi_scan",
+                               timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+            d = await r.json(content_type=None)
+            return d if isinstance(d, list) else []
+    except Exception:
+        return []
+
+
+async def port_open(ip: str, port: int, timeout: float = 0.5) -> bool:
+    """TCP connect 만 해본다. 254개를 훑을 때 HTTP 보다 훨씬 싸다."""
+    try:
+        fut = asyncio.open_connection(ip, port)
+        reader, writer = await asyncio.wait_for(fut, timeout=timeout)
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+        return True
+    except Exception:
+        return False
+
+
+# ── socket.io (:80) ───────────────────────────────────────────────────
+def parse_system(v: List[str]) -> Dict[str, Any]:
+    """system.sh 의 CSV 를 사람이 읽을 형태로. 인덱스는 system/system.sh 기준.
+
+        0 RPI_SERIAL  1 OS_VERSION  2 RUNTIME  3 TEMP  4 MEM_TOTAL
+        5 MEM_AVAIL   6 WLAN0       7 ETH1     8 SSID  9 PSK
+       10 IDENTITY   11 KEY_MGMT
+
+    ⚠ 인덱스 9 는 WiFi 비밀번호 평문이다. 일부러 담지 않는다.
+    """
+    def at(i: int) -> str:
+        return v[i].strip() if len(v) > i and v[i] is not None else ""
+
+    serial = at(0)
+    return {
+        "sn": serial[-8:].lower(),
+        "os": at(1),
+        "uptime": at(2),
+        "temp": at(3),
+        "mem_total": at(4),
+        "mem_avail": at(5),
+        "ip": at(6) or at(7),
+        "ssid": at(8),
+    }
+
+
+class RobotLink:
+    """로봇 한 대와의 socket.io 세션. async with 로 쓴다."""
+
+    def __init__(self, ip: str, timeout: float = 8.0):
+        self.ip = ip
+        self.timeout = timeout
+        self.sio = socketio.AsyncClient(reconnection=False, logger=False,
+                                        engineio_logger=False)
+        self._system: "asyncio.Future[List[str]]" = asyncio.get_running_loop().create_future()
+        self._exit = asyncio.Event()
+        self.record = ""
+        self.on_record: Optional[Callable[[str], None]] = None
+
+        @self.sio.on("system")
+        async def _on_system(v):
+            if not self._system.done():
+                self._system.set_result(v if isinstance(v, list) else [])
+
+        @self.sio.on("update")
+        async def _on_update(d):
+            if not isinstance(d, dict):
+                return
+            if "record" in d:
+                self.record = d["record"] or ""
+                if self.on_record:
+                    self.on_record(self.record)
+            if d.get("exit"):
+                self._exit.set()
+
+    async def __aenter__(self) -> "RobotLink":
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self.close()
+
+    async def connect(self) -> None:
+        await self.sio.connect(f"http://{self.ip}:{config.IDE_PORT}",
+                               transports=["websocket"],
+                               wait_timeout=self.timeout)
+
+    async def close(self) -> None:
+        with contextlib.suppress(Exception):
+            await self.sio.disconnect()
+
+    async def system(self) -> Optional[Dict[str, Any]]:
+        """init 한 번으로 기기 정보를 통째로 받는다 (run_ide.py 의 init 핸들러)."""
+        await self.sio.emit("init")
+        try:
+            v = await asyncio.wait_for(self._system, timeout=self.timeout)
+        except asyncio.TimeoutError:
+            return None
+        return parse_system(v)
+
+    async def execute(self, code: str, codetype: str = "python") -> None:
+        """executeb 로 코드를 던진다.
+
+        ⚠ executeb 에는 is_protect 검사가 없다 (execute 에만 있다).
+        codepath 는 config.CODEPATH 고정이고 UI 에 노출하지 않는다.
+        """
+        await self.sio.emit("executeb", {
+            "codepath": config.CODEPATH,
+            "codetext": code,
+            "codetype": codetype if codetype in ("python", "shell") else "python",
+        })
+
+    async def wait_exit(self, timeout: float) -> bool:
+        try:
+            await asyncio.wait_for(self._exit.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    async def stop(self) -> None:
+        await self.sio.emit("stop")
+
+
+async def identify(ip: str, session: Optional[aiohttp.ClientSession] = None,
+                   timeout: float = 8.0, rules: Optional[dict] = None) -> Optional[dict]:
+    """한 대를 식별한다. init 한 번 + (필요하면) device 보조 판별."""
+    info: Optional[dict] = None
+    try:
+        async with RobotLink(ip, timeout=timeout) as link:
+            info = await link.system()
+    except Exception:
+        return None
+    if not info or not info.get("sn"):
+        return None
+
+    info["ip"] = info.get("ip") or ip
+    info["mode"] = "net"
+
+    device_reply = None
+    if not info.get("os") and session is not None:
+        device_reply = await device_probe(session, ip)
+
+    kind, conf, evidence = detect.classify(info.get("os", ""), device_reply, rules)
+    info["kind"] = kind
+    info["kind_confidence"] = conf
+    info["kind_evidence"] = evidence
+    return info

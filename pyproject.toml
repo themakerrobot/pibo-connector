@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pibo-connector"
+version = "0.1.0"
+description = "파이보/파이브레인 다대수 제어 — 브라우저 한 장으로 찾고, 점호하고, 같은 코드를 한 번에 실행한다"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.27",
+  "python-socketio[asyncio_client]>=5.11",
+  "aiohttp>=3.9",
+]
+
+[project.scripts]
+pibo-connector = "pibo_connector.__main__:main"
+
+[tool.setuptools]
+packages = ["pibo_connector"]
+
+[tool.setuptools.package-data]
+pibo_connector = ["static/*"]
