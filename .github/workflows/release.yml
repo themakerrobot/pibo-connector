@@ -38,6 +38,10 @@ jobs:
             asset: pibo-connector-macos
             built: dist/pibo-connector
     runs-on: ${{ matrix.os }}
+    env:
+      # step 의 if 는 secrets 를 직접 못 보고, 자기 step 의 env 도 못 본다.
+      # job env 로 올려야 아래 '코드 서명' 단계의 if 가 실제로 평가된다.
+      HAS_CERT: ${{ secrets.WIN_CERT_PFX_B64 != '' && secrets.WIN_CERT_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -75,7 +79,6 @@ jobs:
       - name: 코드 서명 (인증서가 있을 때만)
         if: runner.os == 'Windows' && env.HAS_CERT == 'true'
         env:
-          HAS_CERT: ${{ secrets.WIN_CERT_PFX_B64 != '' && secrets.WIN_CERT_PASSWORD != '' }}
           PFX_B64: ${{ secrets.WIN_CERT_PFX_B64 }}
           PFX_PASS: ${{ secrets.WIN_CERT_PASSWORD }}
         shell: pwsh
