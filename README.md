@@ -46,10 +46,29 @@ python run.py --host 0.0.0.0     # 다른 기기에서도 열기 (이때는 토�
 
 ## 쓰는 순서
 
-1. **[찾기]** — 서브넷의 `.1~.254` 를 훑는다. 15대면 보통 3~8초
-2. **[점호]** — 기대 SN 목록을 붙여넣으면 접속 / AP 모드 / 미확인이 갈린다
+화면 문구는 초등 수업 기준으로 쉽게 썼다. 밝은 테마/어두운 테마를 따라가고
+(프로젝터엔 밝은 쪽), 오른쪽 위에서 바꿀 수 있다. 영어는 `?lang=en`.
+
+1. **[로봇 찾기]** — 교실 네트워크의 `.1~.254` 를 훑는다. 15대면 보통 3~8초
+2. **출석 확인** — 우리 반 로봇 번호(가슴의 8자리)를 출석부에 적으면
+   왔어요 / 와이파이 못 붙음 / 안 보여요 로 갈린다
 3. **이름 붙이기** — 표의 이름칸을 눌러 `1번`, `창가` 처럼. 다음날에도 남는다
-4. **코드** → **[실행]** 또는 **[동시 실행]**
+4. 표에서 로봇을 고르고(행을 누르면 된다) **코드** → **[실행!]** 또는 **[다 같이 시작]**
+
+### 코드를 어디서 가져오나
+
+| 모드 | 하는 일 |
+|---|---|
+| **새 코드** | 코드 창의 내용을 고른 로봇 전부에 보내 실행한다. [예제 골라보기…] 로 `examples/` 를 불러오고, [내 컴퓨터 파일 열기] 도 된다. `Ctrl+Enter` 가 실행 |
+| **로봇 안의 파일** | 로봇에 **이미 있는 파일**을 경로로 그 자리에서 실행한다. 코드 창은 쓰지 않는다. [찾아보기] 로 로봇 한 대의 `/home/pi/code` 를 열어 고르고, [코드 창으로 가져오기] 로 읽어와 고친 뒤 전부에 밀어넣을 수도 있다 |
+
+로봇 안의 파일은 `executeb` 로 짧은 런처만 보내서 돌린다 — `.py` 는
+`runpy.run_path(..., run_name='__main__')`, `.sh` 는 `sh`. 대상 파일은 손대지
+않고, 없는 로봇은 출력에 `[missing] 경로` 가 찍힌다. 폴더 목록과 파일 읽기는
+IDE 의 `load_directory` · `load` 이벤트를 그대로 쓴다.
+
+> `load_directory` 는 IDE 의 작업 폴더를 바꾼다. 실행 cwd 가 거기 따라가므로
+> 커넥터가 목록을 다 본 뒤 `/home/pi/code` 로 되돌려 둔다.
 
 ### 찾기
 
@@ -61,7 +80,7 @@ python run.py --host 0.0.0.0     # 다른 기기에서도 열기 (이때는 토�
 
 - **[다시 확인]** — 저장된 IP 로만 확인한다. 안 바뀌었으면 1~2초.
   응답 없는 놈이 있으면 그때만 전체 스캔을 돌리면 된다
-- **[AP 모드 찾기]** — 공유기에 못 붙은 로봇은 IP 가 없어 스캔에 안 걸린다.
+- **[와이파이 못 붙은 로봇 찾기]** — 공유기에 못 붙은 로봇은 IP 가 없어 스캔에 안 걸린다.
   대신 자기 WiFi 를 켜고 있고 SSID 가 `pibo-<SN>` 이다 (`system/hotspot.sh`).
   노트북 WiFi 스캔을 먼저 쓰고, 안 되면 붙어 있는 로봇에게 시킨다
 
@@ -87,7 +106,7 @@ python run.py --host 0.0.0.0     # 다른 기기에서도 열기 (이때는 토�
 { "pibrain": "pibrain", "pi_brain": "pibrain", "pibo": "pibo" }
 ```
 
-새 이미지 이름이 생기면 화면의 **[판별 규칙]** 에서 조각 하나만 더하면 된다
+새 이미지 이름이 생기면 화면의 **[종류 구분 설정]** 에서 조각 하나만 더하면 된다
 (`rules.json` 에 저장된다. 코드를 안 고친다). 어느 조각에도 안 걸리면 `?` 로
 두고 OS_VERSION 원문을 배지에 그대로 띄운다 — 추측으로 기종을 칠하지 않는다.
 
@@ -96,7 +115,7 @@ python run.py --host 0.0.0.0     # 다른 기기에서도 열기 (이때는 토�
 체크한 로봇에 `executeb` 로 동시에 던지고, `update` 이벤트의 `record` 를
 로봇별로 받아 마지막 줄을 띄운다. 줄을 누르면 전체 로그가 펼쳐진다.
 
-**[동시 실행]** 은 시작 시각을 맞춘다. 그냥 [실행] 하면 `import openpibo` 시간이
+**[다 같이 시작]** 은 시작 시각을 맞춘다. 그냥 [실행!] 하면 `import openpibo` 시간이
 로봇마다 달라 수백 ms 씩 어긋난다. 코드를 한 줄로 나눈다:
 
 ```python
@@ -113,7 +132,10 @@ m.set_motion('dance1', 2)            # 본편 — 트리거를 받은 순간 같
 
 > 공유기가 무선 브로드캐스트를 막으면(AP isolation, 멀티캐스트 필터) 트리거가
 > 안 간다. 커넥터는 브로드캐스트와 유니캐스트를 둘 다 쏘지만, 그래도 막히면
-> `[timeout]` 으로 끝나 바로 알 수 있다. 그때는 그냥 [실행] 으로 내려오면 된다.
+> `[timeout]` 으로 끝나 바로 알 수 있다. 그때는 그냥 [실행!] 으로 내려오면 된다.
+>
+> 로봇 안의 파일을 다 같이 시작하려면 내용을 알아야 GO 래퍼로 감쌀 수 있다.
+> 그래서 고른 첫 로봇에서 파일을 읽어와 전부에 밀어넣는다 (파이썬만).
 
 ### 알아둘 것
 
@@ -136,7 +158,8 @@ m.set_motion('dance1', 2)            # 본편 — 트리거를 받은 순간 같
 ## 검증
 
 ```bash
-python -m tests.smoke            # 파싱 · 판별 · PSK 유출 · 래퍼 · 서버 기동
+python -m tests.smoke            # 파싱 · 판별 · PSK 유출 · 래퍼 · 런처 · 번들 경로 · 서버 기동
+python -m tests.exe_smoke dist/pibo-connector   # 묶은 실행 파일이 실제로 뜨는지 (CI 가 세 OS 에서 돌린다)
 ```
 
 기기 없이 전 경로를 돌려보려면 가짜 로봇을 띄운다:
@@ -170,6 +193,11 @@ pyinstaller build/pibo-connector.spec --noconfirm
 # dist/pibo-connector(.exe)
 ```
 
+`static/` 과 `examples/` 는 spec 의 `datas` 로 같이 묶인다 — `config.py` 가
+보는 자리(`_MEIPASS/static`, `_MEIPASS/examples`)와 정확히 맞아야 하고,
+`tests/smoke.py` 가 그걸 확인한다. 윈도우 아이콘은 `build/make_icon.py` 가
+의존성 없이 만든 `build/pibo-connector.ico` 다.
+
 CI 가 같은 스펙으로 빌드한다. `main` push 는 `nightly` 를, `v*` 태그는 정식
 릴리스를 만든다 (`.github/workflows/release.yml`).
 
@@ -188,6 +216,8 @@ CI 가 같은 스펙으로 빌드한다. `main` push 는 `nightly` 를, `v*` 태
 | `stop` 이 실행을 죽인다 | `ide/run_ide.py` `handle_stop` |
 | 8080 은 `/wifi`, `/wifi_scan`, `/device/{pkt}` | `system/booting.py` |
 | `/wifi` 응답에 psk 평문이 있다 | `system/booting.py` |
+| 폴더 목록 · 파일 읽기 이벤트가 있다 | `ide/run_ide.py` `handle_load_directory`, `handle_load` |
+| `load_directory` 가 IDE 작업 폴더(PATH)를 바꾼다 | `ide/run_ide.py` `global PATH` |
 | AP SSID 가 `pibo-<시리얼 뒤 8자리>` | `system/hotspot.sh` `AP_SSID` |
 | hostname 도 같은 8자리 | `system/init` |
 | PiBrain 은 GPIO 직결, Pibo 는 UART device 보드 | `openpibo/device.py` `DeviceByPiBrain` / `DeviceByPibo` |

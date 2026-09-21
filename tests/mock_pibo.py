@@ -36,12 +36,56 @@ def build(sn: str, os_version: str, ip: str, with_device: bool):
         await sio.emit("init", {"codepath": "/home/pi/code/main.py",
                                 "codetext": "", "path": "/home/pi/code"})
 
+    # 가짜 파일 트리. run_ide.py 의 read_directory 가 주는 모양 그대로.
+    TREE = {
+        "/home/pi/code": [
+            {"name": "lib", "type": "folder", "protect": False},
+            {"name": "dance.py", "type": "file", "protect": False},
+            {"name": "hello.sh", "type": "file", "protect": False},
+        ],
+        "/home/pi/code/lib": [
+            {"name": "util.py", "type": "file", "protect": False},
+        ],
+    }
+    FILES = {
+        "/home/pi/code/dance.py": "print('dance from robot')\n",
+        "/home/pi/code/hello.sh": "echo hello from robot\n",
+        "/home/pi/code/lib/util.py": "X = 1\n",
+    }
+    state = {"path": "/home/pi/code"}
+
+    @sio.on("load_directory")
+    async def on_load_directory(sid, p):
+        if p in TREE:
+            state["path"] = p
+        await sio.emit("update_file_manager",
+                       {"data": TREE.get(state["path"], []), "path": state["path"]})
+
+    @sio.on("load")
+    async def on_load(sid, p):
+        if p in FILES:
+            await sio.emit("update", {"code": FILES[p], "filepath": p})
+        else:
+            await sio.emit("update", {"dialog": "err_load", "detail": f"no such file: {p}"})
+
     @sio.on("executeb")
     async def on_executeb(sid, d):
         # run_ide.py 의 execute() 처럼 record 를 누적해 보낸다
         code = d.get("codetext", "")
         rec = "[mock]: \n\n"
         await sio.emit("update", {"record": rec})
+        # 커넥터의 '로봇 파일 실행' 런처를 흉내 낸다
+        import re as _re
+        m = _re.search(r"^_p = '(.+)'$", code, _re.M) or \
+            _re.search(r"exec sh '(.+?)'", code)
+        if m:
+            target = m.group(1)
+            rec += (f"[mock] ran {target}\n" + FILES[target]) if target in FILES \
+                else f"[missing] {target}\n"
+            await sio.emit("update", {"record": rec})
+            rec += "\n[exit]"
+            await sio.emit("update", {"record": rec, "exit": True})
+            return
         for line in code.splitlines():
             if line.startswith("print("):
                 rec += line[6:-1].strip("'\"") + "\n"

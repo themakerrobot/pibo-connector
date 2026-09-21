@@ -9,8 +9,10 @@
 """
 
 import asyncio
+import os
+import posixpath
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from . import config, net, robot
 from .store import Fleet
@@ -45,6 +47,44 @@ _pc_k.close()
 '''
 
 
+def normalize_path(path: str) -> str:
+    """상대 경로는 ROBOT_HOME 기준. 항상 로봇(리눅스) 경로다."""
+    p = (path or "").strip()
+    if not p:
+        raise ValueError("경로가 비었다")
+    if not p.startswith("/"):
+        p = posixpath.join(config.ROBOT_HOME, p)
+    return posixpath.normpath(p)
+
+
+def launcher_for(path: str) -> Tuple[str, str]:
+    """로봇에 이미 있는 파일을 실행하는 짧은 코드. (codetext, codetype).
+
+    executeb 는 codetext 를 _fleet.py 로 쓰고 실행하므로, 대상 파일 자체는
+    손대지 않는다. .py 는 runpy 로 __main__ 처럼, .sh 는 sh 로 돌린다.
+    없는 파일이면 '[missing] 경로' 를 찍고 끝나 출력칸에서 바로 보인다.
+    """
+    p = normalize_path(path)
+    d = posixpath.dirname(p) or "/"
+    if p.endswith(".sh"):
+        def q(x):   # 셸 한따옴표 이스케이프
+            return "'" + x.replace("'", "'\\''") + "'"
+        return (f"[ -f {q(p)} ] || {{ echo '[missing]' {q(p)}; exit 1; }}\n"
+                f"cd {q(d)} && exec sh {q(p)}\n"), "shell"
+    code = (
+        "# pibo-connector: 로봇에 있는 파일을 그 자리에서 실행한다\n"
+        "import os, runpy, sys\n"
+        f"_p = {p!r}\n"
+        "if not os.path.isfile(_p):\n"
+        "    raise SystemExit('[missing] ' + _p)\n"
+        "sys.argv = [_p]\n"
+        "os.chdir(os.path.dirname(_p))\n"
+        "sys.path.insert(0, os.path.dirname(_p))\n"
+        "runpy.run_path(_p, run_name='__main__')\n"
+    )
+    return code, "python"
+
+
 def tail_of(record: str, n: int = 1) -> str:
     lines = [l for l in (record or "").strip().split("\n") if l.strip()]
     return "\n".join(lines[-n:]) if lines else ""
@@ -65,10 +105,13 @@ class Job:
         self.cancelled = False
 
     def snapshot(self) -> dict:
+        # 로봇별 상태는 'states' 다. 'state' 는 job 이벤트의 단계(start/end…)가
+        # 쓰는 키라, 여기서 같은 이름을 쓰면 emit 의 **snapshot() 이 덮어써서
+        # 화면이 실행이 끝난 줄 모른다. 실제로 그랬다.
         return {
             "kind": self.kind,
             "elapsed": round(time.time() - self.started, 1),
-            "state": dict(self.state),
+            "states": dict(self.state),
             "tails": {sn: tail_of(rec) for sn, rec in self.records.items()},
         }
 
@@ -122,10 +165,10 @@ class Runner:
 
     # ── 그냥 실행 ───────────────────────────────────────────────────
     async def run(self, targets: List[str], code: str, codetype: str = "python",
-                  timeout: float = 300.0) -> dict:
-        job = Job("run", targets, self.emit)
+                  timeout: float = 300.0, kind: str = "run") -> dict:
+        job = Job(kind, targets, self.emit)
         self.job = job
-        self.emit({"type": "job", "state": "start", "kind": "run",
+        self.emit({"type": "job", "state": "start", "kind": kind,
                    "targets": targets})
         try:
             links = await asyncio.gather(*(self._open(job, sn) for sn in targets))
@@ -153,6 +196,12 @@ class Runner:
             self.last_records = dict(job.records)
             self.emit({"type": "job", "state": "end", **job.snapshot()})
             self.job = None
+
+    async def run_path(self, targets: List[str], path: str,
+                       timeout: float = 300.0) -> dict:
+        """로봇에 이미 있는 파일을 경로로 실행한다. 편집기 내용은 쓰지 않는다."""
+        code, codetype = launcher_for(path)
+        return await self.run(targets, code, codetype, timeout, kind="run_path")
 
     # ── 동시 시작 ───────────────────────────────────────────────────
     async def sync(self, targets: List[str], code: str,

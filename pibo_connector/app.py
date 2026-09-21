@@ -14,8 +14,8 @@ from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketD
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, config, detect, net, scan
-from .runner import Runner
+from . import __version__, config, detect, net, robot, scan
+from .runner import Runner, normalize_path
 from .store import Fleet
 
 
@@ -233,6 +233,33 @@ def create_app(token: str = "") -> FastAPI:
                   "roster": fleet.roster_status()})
         return {"imported": n}
 
+    # ── 예제 ────────────────────────────────────────────────────────
+    @app.get("/api/examples")
+    async def api_examples(request: Request):
+        """examples/ 의 .py .sh 를 준다. 첫 주석 줄이 제목이다."""
+        check(request)
+        out = []
+        d = config.examples_dir()
+        if d.is_dir():
+            for path in sorted(d.iterdir()):
+                if path.suffix not in (".py", ".sh"):
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                title = ""
+                for line in text.splitlines():
+                    st = line.strip()
+                    if st.startswith("#!"):
+                        continue
+                    if st.startswith("#"):
+                        title = st.lstrip("#").strip()
+                        break
+                    if st:
+                        break
+                out.append({"name": path.name, "title": title or path.name,
+                            "codetype": "shell" if path.suffix == ".sh" else "python",
+                            "code": text})
+        return {"examples": out}
+
     # ── 기종 판별 규칙 ──────────────────────────────────────────────
     @app.get("/api/rules")
     async def get_rules(request: Request):
@@ -289,6 +316,61 @@ def create_app(token: str = "") -> FastAPI:
                                  ready_timeout=float(body.get("ready_timeout") or 60),
                                  wait=float(body.get("wait") or 120),
                                  timeout=float(body.get("timeout") or 300))
+
+    @app.post("/api/run_path")
+    async def api_run_path(request: Request, body: dict = Body(...)):
+        """로봇에 이미 있는 파일을 그 자리에서 실행. 편집기 내용은 쓰지 않는다."""
+        check(request)
+        if runner.busy():
+            raise HTTPException(409, "이미 실행 중이다. 먼저 정지할 것")
+        try:
+            path = normalize_path(body.get("path") or "")
+        except ValueError as ex:
+            raise HTTPException(400, str(ex))
+        return await runner.run_path(_targets(body), path,
+                                     timeout=float(body.get("timeout") or 300))
+
+    # ── 로봇의 파일 ─────────────────────────────────────────────────
+    def _ip_or_404(sn: str) -> str:
+        ip = fleet.ip_of((sn or "").lower())
+        if not ip:
+            raise HTTPException(404, f"{sn}: IP 를 모른다. 먼저 [찾기]")
+        return ip
+
+    @app.post("/api/browse")
+    async def api_browse(request: Request, body: dict = Body(...)):
+        """로봇 한 대의 폴더 목록. IDE 의 load_directory 를 그대로 쓴다."""
+        check(request)
+        ip = _ip_or_404(body.get("sn"))
+        path = (body.get("path") or config.ROBOT_HOME).strip() or config.ROBOT_HOME
+        try:
+            async with robot.RobotLink(ip, timeout=8.0) as link:
+                res = await link.list_dir(path)
+                # 목록을 보느라 IDE 의 작업 폴더가 바뀌었다. 실행 cwd 가
+                # 거기 따라가므로 원래 자리로 돌려둔다.
+                if res["path"] != config.ROBOT_HOME:
+                    await link.sio.emit("load_directory", config.ROBOT_HOME)
+                    await asyncio.sleep(0.2)
+        except Exception as ex:
+            raise HTTPException(502, f"목록을 못 받았다: {ex}")
+        return res
+
+    @app.post("/api/load")
+    async def api_load(request: Request, body: dict = Body(...)):
+        """로봇 한 대에서 파일을 읽어온다. 편집기에 넣어 고친 뒤 전부에 밀어넣는 용도."""
+        check(request)
+        ip = _ip_or_404(body.get("sn"))
+        try:
+            path = normalize_path(body.get("path") or "")
+        except ValueError as ex:
+            raise HTTPException(400, str(ex))
+        try:
+            async with robot.RobotLink(ip, timeout=8.0) as link:
+                code, filepath = await link.load_file(path)
+        except Exception as ex:
+            raise HTTPException(502, f"파일을 못 읽었다: {ex}")
+        return {"code": code, "filepath": filepath or path,
+                "codetype": "shell" if path.endswith(".sh") else "python"}
 
     @app.post("/api/stop")
     async def api_stop(request: Request, body: dict = Body(default={})):

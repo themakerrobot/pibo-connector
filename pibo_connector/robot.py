@@ -7,7 +7,7 @@
 
 import asyncio
 import contextlib
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import aiohttp
 import socketio
@@ -114,8 +114,15 @@ class RobotLink:
                                         engineio_logger=False)
         self._system: "asyncio.Future[List[str]]" = asyncio.get_running_loop().create_future()
         self._exit = asyncio.Event()
+        self._dir: Optional["asyncio.Future[dict]"] = None      # load_directory 응답
+        self._code: Optional["asyncio.Future[Tuple[str, str]]"] = None   # load 응답
         self.record = ""
         self.on_record: Optional[Callable[[str], None]] = None
+
+        @self.sio.on("update_file_manager")
+        async def _on_fm(d):
+            if self._dir and not self._dir.done():
+                self._dir.set_result(d if isinstance(d, dict) else {})
 
         @self.sio.on("system")
         async def _on_system(v):
@@ -132,6 +139,13 @@ class RobotLink:
                     self.on_record(self.record)
             if d.get("exit"):
                 self._exit.set()
+            # handle_load 의 응답. 보호 경로면 dialog=err_load_protected 가 온다.
+            if self._code and not self._code.done():
+                if "code" in d:
+                    self._code.set_result((d.get("code") or "", d.get("filepath") or ""))
+                elif str(d.get("dialog", "")).startswith("err_load"):
+                    self._code.set_exception(RuntimeError(
+                        f"{d['dialog']}: {d.get('detail', '')}".strip(": ")))
 
     async def __aenter__(self) -> "RobotLink":
         await self.connect()
@@ -179,6 +193,23 @@ class RobotLink:
 
     async def stop(self) -> None:
         await self.sio.emit("stop")
+
+    async def list_dir(self, path: str) -> dict:
+        """load_directory — 로봇의 폴더 목록. 없는 경로면 IDE 가 현재 폴더를 준다.
+
+        ⚠ 이 호출은 IDE 의 작업 폴더(전역 PATH)를 그 경로로 바꾼다. 실행의
+        cwd 가 거기 따라가므로, 다 보고 나면 ROBOT_HOME 으로 되돌려 둘 것.
+        """
+        self._dir = asyncio.get_running_loop().create_future()
+        await self.sio.emit("load_directory", path)
+        d = await asyncio.wait_for(self._dir, timeout=self.timeout)
+        return {"path": d.get("path") or path, "entries": d.get("data") or []}
+
+    async def load_file(self, path: str) -> Tuple[str, str]:
+        """load — 파일 내용을 읽는다. (code, filepath). 보호 경로는 거부된다."""
+        self._code = asyncio.get_running_loop().create_future()
+        await self.sio.emit("load", path)
+        return await asyncio.wait_for(self._code, timeout=self.timeout)
 
 
 async def identify(ip: str, session: Optional[aiohttp.ClientSession] = None,

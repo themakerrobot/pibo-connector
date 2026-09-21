@@ -4,51 +4,82 @@
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
+const ROBOT_HOME = '/home/pi/code';
 
 /* ── 사전 ─────────────────────────────────────────────────────────── */
 const EN = {
-  find: 'FIND', scan: 'Scan', refresh: 'Re-check', apscan: 'Find AP mode',
-  find_note: 'Sweeps .1–.254 of the subnet. 15 robots usually take 3–8 s.',
-  roster: 'ROLL CALL', roster_edit: 'Edit expected SN list', save: 'Save',
-  roster_note: 'Only 8-hex-digit SNs are picked up. Any separator works.',
-  list: 'FLEET', select_all: 'Select all', export: 'Export', import: 'Import',
-  rules: 'Detection rules', kind: 'Kind', sn: 'SN', name: 'Name', ip: 'IP',
-  os: 'OS_VERSION', temp: 'Temp', status: 'Status', seen: 'Last seen',
-  empty: 'No robots yet. Hit [Scan].',
-  code: 'CODE', run: 'Run', sync: 'Run in sync', stop: 'Stop',
-  warn_shared: '⚠ Running stops tools · classify · llama-server on the robot. ' +
-    'LLM code must call Dialog.start_llm first. The IDE console is global: output ' +
-    'also shows in a teacher browser, and anyone hitting Run in the IDE kills this code.',
-  warn_sync: 'Sync run: heavy imports finish first, then one UDP trigger releases ' +
-    'everyone at once. Split the code with # --- GO --- — above is setup, below is the ' +
-    'real thing. If the router blocks broadcast the trigger never arrives and it ends in [timeout].',
-  output: 'OUTPUT',
-  out_empty: 'Per-robot last line shows here. Click a line to expand the full log.',
+  up: 'up', ap: 'no wifi', selected: 'picked', conn_off: 'offline', conn_on: 'connected',
+  find: 'FIND ROBOTS', subnet: 'Classroom network', scan: 'Find robots', refresh: 'Re-check', apscan: 'Find robots without wifi',
+  find_note: 'Looks for robots that are on in this classroom. About 5 seconds.',
+  roster: 'ATTENDANCE', roster_edit: 'Edit class list (robot numbers)', save: 'Save',
+  roster_note: 'Type the 8-digit number on each robot\'s chest. Any spacing works.',
+  list: 'ROBOTS', select_all: 'Pick all', only_up: 'Only robots that are on', export: 'Save list', import: 'Load list',
+  rules: 'Kind settings', kind: 'Kind', sn: 'Number', name: 'Name', ip: 'Address',
+  os: 'Version', temp: 'Temp', status: 'Status', seen: 'Last seen',
+  empty: 'No robots yet. Press [Find robots] above.',
+  code: 'CODE', mode_new: 'New code', mode_file: 'File inside robot', examples: 'Pick an example…',
+  open_file: 'Open file from my computer', path: 'File location', browse: 'Browse', pull: 'Copy into code box',
+  file_note: 'Runs the file at this location on every picked robot, as it is. The code box above is not used.',
+  run: 'Run!', sync: 'Start together', stop: 'Stop', to_run: 'run', hints: 'Good to know',
+  warn_shared: '⚠ Running pauses the robot\'s other features (tools, recognition, AI chat). For AI chat, call Dialog.start_llm first. The robot\'s coding screen (IDE) shows the same output, and pressing Run there stops this code.',
+  warn_sync: 'Start together: everyone gets ready first, then one signal starts them all at once. Put a # --- GO --- line in the code — above it is setup, below it is the action. If the router blocks the signal it ends in [timeout]; just use [Run!] then.',
+  output: 'RESULTS', expand_all: 'Expand all', collapse_all: 'Collapse all', clear: 'Clear',
+  out_empty: 'After running, each robot\'s last line shows here. Click to see everything.',
+  rules_title: 'Robot kind settings',
+  rules_note: 'If the robot\'s version name contains this text, it is that kind. Longer text is checked first — <span class="kbd">pibrain</span> before <span class="kbd">pibo</span>.',
+  add_rule: '+ Add', cancel: 'Cancel', save_apply: 'Save & sort again',
+  browse_title: 'Files inside robot', use_path: 'Use this file',
+  browse_note: 'Every picked robot needs this file in the same place. Robots without it show [missing].',
 };
 let LANG = new URLSearchParams(location.search).get('lang') === 'en' ? 'en' : 'ko';
 const KO = {};
-
-function captureKo() {
-  $$('[data-t]').forEach((el) => { KO[el.dataset.t] = el.innerHTML; });
-}
+function captureKo() { $$('[data-t]').forEach((el) => { KO[el.dataset.t] = el.innerHTML; }); }
 function applyLang() {
   const dict = LANG === 'en' ? EN : KO;
-  $$('[data-t]').forEach((el) => {
-    const v = dict[el.dataset.t];
-    if (v !== undefined) el.innerHTML = v;
-  });
+  $$('[data-t]').forEach((el) => { const v = dict[el.dataset.t]; if (v !== undefined) el.innerHTML = v; });
   $('#lang').textContent = LANG === 'en' ? '한국어' : 'EN';
   document.documentElement.lang = LANG;
-  render();
+  render(); renderOut();
 }
 const T = (ko, en) => (LANG === 'en' ? en : ko);
+const STATE = {
+  pending: ['기다리는 중', 'waiting'], connected: ['연결됨', 'connected'], running: ['실행 중', 'running'],
+  preparing: ['준비 중', 'preparing'], ready: ['준비 끝', 'ready'], done: ['끝', 'done'],
+  error: ['오류', 'error'], timeout: ['시간 초과', 'timeout'], 'no-ip': ['주소 없음', 'no address'],
+  stopped: ['멈춤', 'stopped'], up: ['켜짐', 'up'], ap: ['와이파이 못 붙음', 'no wifi'], offline: ['대답 없음', 'no reply'],
+};
+const stateLabel = (st) => (STATE[st] ? T(STATE[st][0], STATE[st][1]) : st || '');
+
+/* ── 테마 ─────────────────────────────────────────────────────────── */
+function applyTheme(t) {
+  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  try { if (t) localStorage.setItem('theme', t); else localStorage.removeItem('theme'); } catch (e) {}
+}
+function currentDark() {
+  const t = document.documentElement.dataset.theme;
+  if (t) return t === 'dark';
+  return matchMedia('(prefers-color-scheme: dark)').matches;
+}
+try { applyTheme(localStorage.getItem('theme') || ''); } catch (e) {}
 
 /* ── 상태 ─────────────────────────────────────────────────────────── */
-let fleet = [];          // [{sn, name, ip, kind, os, temp, mode, ...}]
+let fleet = [];            // [{sn, name, ip, kind, os, temp, mode, last_seen, ...}]
 let roster = null;
 let selected = new Set();
-let outputs = {};        // sn -> {state, tail, open, full}
+let outputs = {};          // sn -> {state, tail, open, full}
 let busy = false;
+let jobStart = 0, jobKind = '';
+let mode = 'new';          // 'new' | 'file'
+let sortKey = 'name', sortDesc = false, onlyUp = false;
+try {
+  sortKey = localStorage.getItem('sortKey') || 'name';
+  sortDesc = localStorage.getItem('sortDesc') === '1';
+  onlyUp = localStorage.getItem('onlyUp') === '1';
+  mode = localStorage.getItem('mode') === 'file' ? 'file' : 'new';
+  (JSON.parse(localStorage.getItem('selected') || '[]')).forEach((s) => selected.add(s));
+  const rp = localStorage.getItem('rpath'); if (rp) $('#rpath').value = rp;
+  const code = localStorage.getItem('code'); if (code) $('#code').value = code;
+} catch (e) {}
 
 /* ── API ──────────────────────────────────────────────────────────── */
 async function api(path, body) {
@@ -64,379 +95,524 @@ async function api(path, body) {
   return data;
 }
 
+/* ── 토스트 ───────────────────────────────────────────────────────── */
+function toast(msg, kind = '', ms = 3500) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind; el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .25s'; }, ms - 250);
+  setTimeout(() => el.remove(), ms);
+}
+const err = (e) => toast('!! ' + (e && e.message ? e.message : e), 'bad', 6000);
+
 /* ── WebSocket ────────────────────────────────────────────────────── */
 let ws = null, wsTimer = null;
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws${TOKEN ? '?token=' + TOKEN : ''}`);
-  ws.onopen = () => { $('#conn').classList.add('on'); };
+  ws.onopen = () => { $('#conn').classList.add('on'); $('#conn span').textContent = T('연결됨', 'connected'); };
   ws.onclose = () => {
-    $('#conn').classList.remove('on');
-    clearTimeout(wsTimer);
-    wsTimer = setTimeout(connect, 1500);
+    $('#conn').classList.remove('on'); $('#conn span').textContent = T('연결 끊김', 'offline');
+    clearTimeout(wsTimer); wsTimer = setTimeout(connect, 1500);
   };
-  ws.onmessage = (e) => {
-    let m; try { m = JSON.parse(e.data); } catch (_) { return; }
-    handle(m);
-  };
+  ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (_) { return; } handle(m); };
 }
 
 function handle(m) {
   switch (m.type) {
     case 'hello':
       $('#ver').textContent = 'v' + m.version;
-      if (!$('#subnet').value && m.subnets && m.subnets.length) {
-        $('#subnet').value = m.subnets[0];
-      }
+      if (!$('#subnet').value && m.subnets && m.subnets.length) $('#subnet').value = m.subnets[0];
       fleet = m.fleet || []; roster = m.roster || null; busy = !!m.busy;
-      render();
-      break;
+      render(); break;
     case 'fleet':
-      fleet = m.robots || fleet;
-      if (m.roster) roster = m.roster;
-      render();
-      break;
+      fleet = m.robots || fleet; if (m.roster) roster = m.roster; render(); break;
     case 'scan':
-      if (m.phase === 'found' && m.robot) {
-        upsertLocal(m.robot);
-        render();
-      } else if (m.total) {
+      if (m.phase === 'found' && m.robot) { upsertLocal(m.robot); render(); }
+      else if (m.total) {
+        $('#progress').hidden = false;
         const pct = Math.round((m.done / m.total) * 100);
         $('#scan-bar').style.width = pct + '%';
-        const label = m.phase === 'port' ? T('포트 확인', 'probing')
-          : m.phase === 'identify' ? T('기기 확인', 'identifying')
-            : T('다시 확인', 're-checking');
-        $('#scan-msg').textContent = `${label} ${m.done}/${m.total}` +
-          (m.found ? ` · ${m.found}` + T('대 응답', ' up') : '');
+        $('#scan-bar').parentElement.classList.toggle('done', pct >= 100);
+        const label = m.phase === 'port' ? T('두드리는 중', 'knocking')
+          : m.phase === 'identify' ? T('이름 물어보는 중', 'asking names') : T('다시 확인 중', 're-checking');
+        $('#scan-msg').textContent = `${label} ${m.done}/${m.total}` + (m.found ? ` · ${m.found}` + T('대', ' up') : '');
       }
       break;
     case 'run':
-      outputs[m.sn] = Object.assign(outputs[m.sn] || {}, {
-        state: m.state,
-        tail: m.tail !== undefined ? m.tail : (outputs[m.sn] || {}).tail,
-      });
-      renderOut();
-      break;
+      outputs[m.sn] = Object.assign(outputs[m.sn] || {}, { state: m.state, tail: m.tail !== undefined ? m.tail : (outputs[m.sn] || {}).tail });
+      renderOut(); render(); break;
     case 'output':
       outputs[m.sn] = Object.assign(outputs[m.sn] || {}, { tail: m.tail, len: m.len });
       if ((outputs[m.sn] || {}).open) loadFull(m.sn);
-      renderOut();
-      break;
-    case 'job':
-      if (m.state === 'start') {
-        busy = true;
-        outputs = {};
-        (m.targets || []).forEach((sn) => { outputs[sn] = { state: 'pending', tail: '' }; });
-      }
-      if (m.state === 'end' || m.state === 'stopped') busy = false;
-      if (m.state === 'trigger') {
-        $('#run-msg').textContent = T(
-          `트리거 발사 → ${(m.sent_to || []).join(', ')}` +
-          ((m.not_ready || []).length ? ` · 준비 안 된 로봇 ${m.not_ready.length}대` : ''),
-          `trigger sent → ${(m.sent_to || []).join(', ')}` +
-          ((m.not_ready || []).length ? ` · ${m.not_ready.length} not ready` : ''));
-      }
-      if (m.state === 'end') {
-        $('#run-msg').textContent = T(`끝 · ${m.elapsed}초`, `done · ${m.elapsed}s`);
-      }
-      if (m.state && m.state !== 'end') {
-        const label = { start: T('시작', 'start'), running: T('실행 중', 'running'),
-          preparing: T('준비 중 (import)', 'preparing'), stopped: T('정지', 'stopped') }[m.state];
-        if (label) $('#run-msg').textContent = label;
-      }
-      renderButtons();
-      break;
+      renderOut(); break;
+    case 'job': onJob(m); break;
   }
+}
+
+function onJob(m) {
+  const jobLabel = { start: T('시작', 'start'), running: T('실행 중', 'running'), preparing: T('준비 중', 'preparing'),
+    trigger: T('출발 신호', 'go signal'), stopped: T('멈췄어요', 'stopped') };
+  if (m.state === 'start') {
+    busy = true; jobStart = Date.now(); jobKind = m.kind || 'run'; outputs = {};
+    (m.targets || []).forEach((sn) => { outputs[sn] = { state: 'pending', tail: '' }; });
+  }
+  if (m.state === 'trigger') {
+    const nr = (m.not_ready || []).length;
+    toast(T(`출발 신호 보냈어요` + (nr ? ` · 준비 안 된 로봇 ${nr}대` : ''),
+      `trigger sent → ${(m.sent_to || []).join(', ')}` + (nr ? ` · ${nr} not ready` : '')), nr ? 'warn' : 'ok');
+  }
+  if (m.state === 'end' || m.state === 'stopped') {
+    busy = false;
+    if (m.state === 'end') {
+      const bad = Object.values(m.states || {}).filter((v) => v !== 'done').length;
+      $('#run-msg').textContent = T(`끝! ${m.elapsed}초 걸렸어요`, `done · ${m.elapsed}s`) + (bad ? T(` · 잘 안 된 로봇 ${bad}대`, ` · ${bad} with issues`) : '');
+      toast(bad ? T(`끝났어요. 잘 안 된 로봇이 ${bad}대 있어요 — 결과를 눌러 확인해 보세요`, `done, ${bad} with issues`)
+                : T('모두 잘 끝났어요', 'all done'), bad ? 'warn' : 'ok');
+    } else $('#run-msg').textContent = jobLabel.stopped;
+  } else if (jobLabel[m.state]) $('#run-msg').textContent = jobLabel[m.state];
+  renderStrip(); renderButtons(); renderOut();
 }
 
 function upsertLocal(row) {
   const i = fleet.findIndex((r) => r.sn === row.sn);
-  if (i >= 0) fleet[i] = Object.assign({}, fleet[i], row);
-  else fleet.push(row);
+  if (i >= 0) fleet[i] = Object.assign({}, fleet[i], row); else fleet.push(row);
 }
 
 /* ── 렌더 ─────────────────────────────────────────────────────────── */
+const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const isUp = (r) => !!r.ip && r.mode !== 'ap' && r.mode !== 'offline';
+const tempNum = (r) => { const m = /(-?\d+(\.\d+)?)/.exec(r.temp || ''); return m ? parseFloat(m[1]) : NaN; };
+
+function rel(ts) {
+  if (!ts) return '';
+  const t = new Date(ts.replace(' ', 'T')); if (isNaN(t)) return ts;
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 60) return T('방금', 'just now');
+  if (s < 3600) return T(`${Math.floor(s / 60)}분 전`, `${Math.floor(s / 60)}m ago`);
+  if (s < 86400) return T(`${Math.floor(s / 3600)}시간 전`, `${Math.floor(s / 3600)}h ago`);
+  return ts.slice(5, 16);
+}
+
 function kindBadge(r) {
   const k = r.kind || 'unknown';
   const label = k === 'pibo' ? 'Pibo' : k === 'pibrain' ? 'PiBrain' : '?';
   const low = r.kind_confidence !== 'high' ? ' low' : '';
-  const ev = (r.kind_evidence || '').replace(/"/g, '&quot;');
+  const ev = esc(r.kind_evidence || '') + (low ? T(' — 확실하지 않아요', ' — needs checking') : '');
   return `<span class="badge ${k}${low}" title="${ev}">${label}</span>`;
 }
 
-function modeLabel(r) {
-  if (r.mode === 'ap') return `<span class="state ready">AP</span>`;
-  if (r.mode === 'offline') return `<span class="state error">${T('응답 없음', 'no reply')}</span>`;
+function stateOf(r) {
+  if (r.mode === 'ap') return ['ap', stateLabel('ap')];
+  if (r.mode === 'offline') return ['offline', stateLabel('offline')];
+  if (!r.ip) return ['offline', '—'];
   const st = (outputs[r.sn] || {}).state;
-  if (st) return `<span class="state ${st}">${st}</span>`;
-  return `<span class="state done">${T('접속', 'up')}</span>`;
+  if (st && busy) return [st, stateLabel(st)];
+  if (st === 'done' || st === 'error' || st === 'timeout') return [st, stateLabel(st)];
+  return ['up', stateLabel('up')];
+}
+
+function sortedFleet() {
+  const rows = fleet.filter((r) => !onlyUp || isUp(r));
+  const kindOrder = { pibo: 0, pibrain: 1, unknown: 2 };
+  const key = (r) => {
+    switch (sortKey) {
+      case 'kind': return kindOrder[r.kind] ?? 3;
+      case 'ip': return (r.ip || '999.999.999.999').split('.').map((n) => n.padStart(3, '0')).join('.');
+      case 'temp': { const t = tempNum(r); return isNaN(t) ? -1 : t; }
+      case 'mode': return isUp(r) ? 0 : r.mode === 'ap' ? 1 : 2;
+      case 'last_seen': return r.last_seen || '';
+      case 'name': return (r.name || '￿') + (r.sn || '');
+      default: return r[sortKey] || '';
+    }
+  };
+  rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * (sortDesc ? -1 : 1); });
+  return rows;
 }
 
 function render() {
-  const tb = $('#tbody');
-  tb.innerHTML = fleet.map((r) => {
-    const off = r.mode === 'ap' || r.mode === 'offline' || !r.ip;
-    return `<tr class="${off ? 'off' : ''}" data-sn="${r.sn}">
-      <td><input type="checkbox" class="pick" data-sn="${r.sn}"
-           ${selected.has(r.sn) ? 'checked' : ''} ${r.ip ? '' : 'disabled'}></td>
+  const rows = sortedFleet();
+  $('#tbody').innerHTML = rows.map((r) => {
+    const [stc, stl] = stateOf(r);
+    const t = tempNum(r);
+    const tc = isNaN(t) ? '' : t >= 70 ? 'hot' : t >= 60 ? 'warmish' : '';
+    const sel = selected.has(r.sn);
+    return `<tr class="${isUp(r) ? '' : 'off'} ${sel ? 'sel' : ''}" data-sn="${r.sn}">
+      <td class="pick"><input type="checkbox" class="pick" data-sn="${r.sn}" ${sel ? 'checked' : ''} ${isUp(r) ? '' : 'disabled'}></td>
       <td>${kindBadge(r)}</td>
       <td class="mono">${r.sn}</td>
-      <td><input class="name-edit" data-sn="${r.sn}" value="${(r.name || '').replace(/"/g, '&quot;')}"
-           placeholder="${T('이름', 'name')}"></td>
+      <td><input class="name-edit" data-sn="${r.sn}" value="${esc(r.name)}" placeholder="${T('이름', 'name')}" maxlength="24"></td>
       <td class="mono">${r.ip || '—'}</td>
-      <td class="mono hide-s" title="${(r.kind_evidence || '')}">${r.os || '—'}</td>
-      <td class="mono hide-s">${r.temp || '—'}</td>
-      <td>${modeLabel(r)}</td>
-      <td class="hide-s note">${(r.last_seen || '').slice(5, 16)}</td>
-      <td><button class="small del" data-sn="${r.sn}" title="${T('목록에서 지움', 'remove')}">×</button></td>
+      <td class="mono hide-m" title="${esc(r.kind_evidence)}">${esc(r.os) || '—'}</td>
+      <td class="mono hide-m"><span class="temp ${tc}">${esc(r.temp) || '—'}</span></td>
+      <td><span class="state ${stc}">${stl}</span></td>
+      <td class="hide-m note" style="margin:0" title="${esc(r.last_seen)}">${rel(r.last_seen)}</td>
+      <td class="del"><button class="x" data-sn="${r.sn}" title="${T('목록에서 지우기', 'remove')}">×</button></td>
     </tr>`;
   }).join('');
   $('#empty').style.display = fleet.length ? 'none' : '';
-  $('#sel-count').textContent = selected.size
-    ? T(`${selected.size}대 선택`, `${selected.size} selected`) : '';
-  renderRoster();
-  renderButtons();
+  $('#fleet').style.display = fleet.length ? '' : 'none';
+  $$('th[data-sort]').forEach((th) => {
+    th.classList.toggle('sorted', th.dataset.sort === sortKey);
+    th.classList.toggle('desc', th.dataset.sort === sortKey && sortDesc);
+  });
+  const ups = fleet.filter(isUp).map((r) => r.sn);
+  $('#chk-all').checked = ups.length > 0 && ups.every((s) => selected.has(s));
+  $('#chk-all').indeterminate = ups.some((s) => selected.has(s)) && !$('#chk-all').checked;
+  renderStrip(); renderRoster(); renderButtons(); renderBrowseRobots();
 }
 
+function renderStrip() {
+  $('#st-up b').textContent = fleet.filter(isUp).length;
+  $('#st-ap b').textContent = fleet.filter((r) => r.mode === 'ap').length;
+  $('#st-sel b').textContent = selected.size;
+  const j = $('#st-job');
+  if (busy) {
+    j.hidden = false; j.classList.add('running');
+    const kind = { run: T('실행 중', 'running'), run_path: T('파일 실행 중', 'running file'), sync: T('다 같이 시작', 'sync run') }[jobKind] || jobKind;
+    j.textContent = `${kind} · ${Math.floor((Date.now() - jobStart) / 1000)}s`;
+  } else { j.hidden = true; j.classList.remove('running'); }
+}
+setInterval(() => { if (busy) { renderStrip(); $$('.out .item .el').forEach((el) => { el.textContent = Math.floor((Date.now() - jobStart) / 1000) + 's'; }); } }, 1000);
+
 function renderRoster() {
-  if (!roster) { $('#roster-sum').innerHTML = ''; return; }
-  const up = (roster.present || []).length;
-  const ap = (roster.ap || []).length;
-  const miss = roster.missing || [];
-  const extra = roster.extra || [];
-  if (!roster.expected) {
-    $('#roster-sum').innerHTML =
-      `<span class="note">${T('기대 SN 목록을 넣으면 점호가 된다.',
-        'Add an expected SN list to get a roll call.')}</span>`;
-    return;
+  const sum = $('#roster-sum'), chips = $('#roster-chips');
+  if (!roster || !roster.expected) {
+    sum.innerHTML = `<span class="note" style="margin:0">${T('아래 출석부에 우리 반 로봇 번호를 적으면 누가 왔는지 알 수 있어요.', 'Add an expected SN list to get a roll call.')}</span>`;
+    chips.innerHTML = ''; return;
   }
-  $('#roster-sum').innerHTML =
-    `<span><b class="ok">${up}</b> / ${roster.expected} ${T('접속', 'up')}</span>` +
-    (ap ? `<span><b class="warn">${ap}</b> ${T('AP 모드', 'AP mode')}
-       <span class="mono note">${roster.ap.join(' ')}</span></span>` : '') +
-    (miss.length ? `<span><b class="bad">${miss.length}</b> ${T('미확인', 'missing')}
-       <span class="mono note">${miss.join(' ')}</span></span>` : '') +
-    (extra.length ? `<span class="note">${T('목록 밖', 'extra')}
-       <span class="mono">${extra.join(' ')}</span></span>` : '');
+  const up = roster.present || [], ap = roster.ap || [], miss = roster.missing || [], extra = roster.extra || [];
+  sum.innerHTML =
+    `<span class="ok"><b>${up.length}</b>/ ${roster.expected} ${T('왔어요', 'up')}</span>` +
+    `<span class="${ap.length ? 'warn' : ''}"><b>${ap.length}</b>${T('와이파이 못 붙음', 'no wifi')}</span>` +
+    `<span class="${miss.length ? 'bad' : ''}"><b>${miss.length}</b>${T('안 보여요', 'missing')}</span>`;
+  const nm = (sn) => { const r = fleet.find((x) => x.sn === sn); return r && r.name ? `${r.name} ` : ''; };
+  chips.innerHTML =
+    up.map((s) => `<span class="chip up" title="${T('왔어요', 'up')}">${nm(s)}${s}</span>`).join('') +
+    ap.map((s) => `<span class="chip ap" title="${T('와이파이 못 붙음', 'no wifi')}">${nm(s)}${s}</span>`).join('') +
+    miss.map((s) => `<span class="chip missing" title="${T('안 보여요', 'missing')}">${nm(s)}${s}</span>`).join('') +
+    extra.map((s) => `<span class="chip extra" title="${T('출석부에 없는 로봇', 'not in roster')}">${nm(s)}${s}</span>`).join('');
 }
 
 function renderButtons() {
   const has = selected.size > 0;
   $('#btn-run').disabled = busy || !has;
   $('#btn-sync').disabled = busy || !has;
-  $('#btn-scan').disabled = busy;
-  $('#btn-refresh').disabled = busy;
+  $('#btn-scan').disabled = busy; $('#btn-refresh').disabled = busy;
+  $('#btn-browse').disabled = !has; $('#btn-pull').disabled = !has;
+  $('#btn-run').textContent = mode === 'file' ? T('파일 실행!', 'Run file') : T('실행!', 'Run');
 }
 
 function renderOut() {
   const sns = Object.keys(outputs);
   $('#out-empty').style.display = sns.length ? 'none' : '';
+  const anyOpen = sns.some((s) => outputs[s].open);
+  $('#btn-expand').textContent = anyOpen ? T('모두 접기', 'Collapse all') : T('모두 펼치기', 'Expand all');
   $('#out').innerHTML = sns.map((sn) => {
-    const o = outputs[sn] || {};
-    const r = fleet.find((x) => x.sn === sn) || {};
-    const nm = r.name ? `${r.name} · ` : '';
-    return `<div class="item" data-sn="${sn}">
-      <div class="head">
-        <span class="mono">${nm}${sn}</span>
-        <span class="state ${o.state || ''}">${o.state || ''}</span>
-        <span class="note">${r.ip || ''}</span>
-      </div>
+    const o = outputs[sn] || {}, r = fleet.find((x) => x.sn === sn) || {};
+    const who = r.name ? `${esc(r.name)} <span class="mono">${sn}</span>` : `<span class="mono">${sn}</span>`;
+    const el = busy && !['done', 'error', 'timeout', 'no-ip'].includes(o.state) ? `<span class="el">${Math.floor((Date.now() - jobStart) / 1000)}s</span>` : '';
+    return `<div class="item ${o.state || ''}" data-sn="${sn}">
+      <div class="h"><span class="who">${who}</span><span class="state ${o.state || ''}">${stateLabel(o.state)}</span><span class="ip">${r.ip || ''}</span>${el}</div>
       <div class="tail">${esc(o.tail || '')}</div>
-      ${o.open ? `<pre>${esc(o.full || T('불러오는 중…', 'loading…'))}</pre>` : ''}
+      ${o.open ? `<pre>${esc(o.full == null ? T('불러오는 중…', 'loading…') : o.full || T('(아무것도 안 나왔어요)', '(no output)'))}</pre>` : ''}
     </div>`;
   }).join('');
 }
 
-function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 async function loadFull(sn) {
-  try {
-    const d = await api(`/api/output/${sn}`);
-    outputs[sn] = Object.assign(outputs[sn] || {}, { full: d.record || '' });
-    renderOut();
-  } catch (e) { /* 실행 전이면 없을 수 있다 */ }
+  try { const d = await api(`/api/output/${sn}`); outputs[sn] = Object.assign(outputs[sn] || {}, { full: d.record || '' }); renderOut(); }
+  catch (e) { /* 실행 전이면 없을 수 있다 */ }
 }
 
-/* ── 동작 ─────────────────────────────────────────────────────────── */
-function targets() { return Array.from(selected); }
-
-function msg(el, text, cls) {
-  const n = $(el);
-  n.textContent = text;
-  n.className = 'note' + (cls ? ' ' + cls : '');
-}
-
-async function guard(el, fn) {
-  try { await fn(); } catch (e) { msg(el, '!! ' + e.message, 'bad'); }
-}
-
-$('#btn-scan').onclick = () => guard('#scan-msg', async () => {
-  msg('#scan-msg', T('훑는 중…', 'scanning…'));
-  $('#scan-bar').style.width = '0';
-  const d = await api('/api/scan', { subnet: $('#subnet').value.trim() });
-  $('#scan-bar').style.width = '100%';
-  msg('#scan-msg', T(`${d.found}대 찾음`, `${d.found} found`), 'ok');
-});
-
-$('#btn-refresh').onclick = () => guard('#scan-msg', async () => {
-  msg('#scan-msg', T('확인 중…', 're-checking…'));
-  const d = await api('/api/refresh', {});
-  $('#scan-bar').style.width = '100%';
-  msg('#scan-msg', T(`${d.ok.length}대 그대로` + (d.lost.length ? `, ${d.lost.length}대 응답 없음` : ''),
-    `${d.ok.length} unchanged` + (d.lost.length ? `, ${d.lost.length} not replying` : '')),
-    d.lost.length ? 'warn' : 'ok');
-});
-
-$('#btn-apscan').onclick = () => guard('#scan-msg', async () => {
-  msg('#scan-msg', T('전파 스캔 중…', 'scanning air…'));
-  const d = await api('/api/apscan', {});
-  const n = (d.found || []).length;
-  let s = n
-    ? T(`AP 모드 ${n}대: ` + d.found.map((f) => f.sn).join(' '),
-      `${n} in AP mode: ` + d.found.map((f) => f.sn).join(' '))
-    : T('AP 모드 로봇 없음 (전부 공유기에 붙었다)', 'none in AP mode');
-  if (d.stale) s += T('  ※ 로봇의 캐시된 스캔 결과라 참고용',
-    '  ※ cached scan from a robot — reference only');
-  if (d.error) s += '  (' + d.error + ')';
-  msg('#scan-msg', s, n ? 'warn' : 'ok');
-});
-
-$('#btn-roster').onclick = () => guard('#scan-msg', async () => {
-  const d = await api('/api/roster', { sns: $('#roster-text').value });
-  roster = d.status;
-  renderRoster();
-  msg('#scan-msg', T(`기대 ${d.roster.length}대 저장`, `saved ${d.roster.length} expected`), 'ok');
-});
+/* ── 선택 ─────────────────────────────────────────────────────────── */
+function saveSel() { try { localStorage.setItem('selected', JSON.stringify(Array.from(selected))); } catch (e) {} }
+const targets = () => Array.from(selected).filter((sn) => { const r = fleet.find((x) => x.sn === sn); return r && isUp(r); });
+const firstTarget = () => targets()[0];
 
 $('#chk-all').onchange = (e) => {
-  selected = new Set(e.target.checked ? fleet.filter((r) => r.ip).map((r) => r.sn) : []);
-  render();
+  selected = new Set(e.target.checked ? fleet.filter(isUp).map((r) => r.sn) : []); saveSel(); render();
 };
-
+$('#only-up').checked = onlyUp;
+$('#only-up').onchange = (e) => { onlyUp = e.target.checked; try { localStorage.setItem('onlyUp', onlyUp ? '1' : '0'); } catch (_) {} render(); };
+$('#fleet thead').addEventListener('click', (e) => {
+  const th = e.target.closest('th[data-sort]'); if (!th) return;
+  if (sortKey === th.dataset.sort) sortDesc = !sortDesc; else { sortKey = th.dataset.sort; sortDesc = false; }
+  try { localStorage.setItem('sortKey', sortKey); localStorage.setItem('sortDesc', sortDesc ? '1' : '0'); } catch (_) {}
+  render();
+});
 $('#tbody').addEventListener('change', (e) => {
-  if (e.target.classList.contains('pick')) {
-    const sn = e.target.dataset.sn;
-    if (e.target.checked) selected.add(sn); else selected.delete(sn);
-    $('#sel-count').textContent = selected.size
-      ? T(`${selected.size}대 선택`, `${selected.size} selected`) : '';
-    renderButtons();
-  }
+  if (!e.target.classList.contains('pick')) return;
+  const sn = e.target.dataset.sn;
+  if (e.target.checked) selected.add(sn); else selected.delete(sn);
+  saveSel(); render();
 });
-
+$('#tbody').addEventListener('click', (e) => {
+  // 행 아무 데나 눌러도 선택. 입력칸·버튼은 제외
+  if (e.target.closest('input, button, a')) return;
+  const tr = e.target.closest('tr[data-sn]'); if (!tr) return;
+  const r = fleet.find((x) => x.sn === tr.dataset.sn); if (!r || !isUp(r)) return;
+  if (selected.has(r.sn)) selected.delete(r.sn); else selected.add(r.sn);
+  saveSel(); render();
+});
 $('#tbody').addEventListener('blur', async (e) => {
-  if (e.target.classList.contains('name-edit')) {
-    await api('/api/rename', { sn: e.target.dataset.sn, name: e.target.value });
-  }
+  if (!e.target.classList.contains('name-edit')) return;
+  const sn = e.target.dataset.sn, r = fleet.find((x) => x.sn === sn);
+  if (r && (r.name || '') === e.target.value) return;
+  try { await api('/api/rename', { sn, name: e.target.value }); } catch (ex) { err(ex); }
 }, true);
-
 $('#tbody').addEventListener('keydown', (e) => {
-  if (e.target.classList.contains('name-edit') && e.key === 'Enter') e.target.blur();
+  if (e.target.classList.contains('name-edit') && (e.key === 'Enter' || e.key === 'Escape')) e.target.blur();
+});
+$('#tbody').addEventListener('click', async (e) => {
+  const b = e.target.closest('button.x'); if (!b) return;
+  const sn = b.dataset.sn;
+  if (!confirm(T(`${sn} 로봇을 목록에서 지울까요?`, `Remove ${sn} from the list?`))) return;
+  try { await api('/api/remove', { sn }); selected.delete(sn); saveSel(); } catch (ex) { err(ex); }
 });
 
-$('#tbody').addEventListener('click', async (e) => {
-  if (e.target.classList.contains('del')) {
-    const sn = e.target.dataset.sn;
-    if (!confirm(T(`${sn} 를 목록에서 지운다`, `Remove ${sn} from the list`))) return;
-    await api('/api/remove', { sn });
-    selected.delete(sn);
+/* ── 찾기 ─────────────────────────────────────────────────────────── */
+async function guard(fn) { try { await fn(); } catch (e) { err(e); } }
+
+$('#btn-scan').onclick = () => guard(async () => {
+  $('#progress').hidden = false; $('#scan-bar').style.width = '0'; $('#scan-bar').parentElement.classList.remove('done');
+  $('#scan-msg').textContent = T('찾는 중…', 'scanning…');
+  const d = await api('/api/scan', { subnet: $('#subnet').value.trim() });
+  $('#scan-bar').style.width = '100%'; $('#scan-bar').parentElement.classList.add('done');
+  $('#scan-msg').textContent = T(`${d.found}대 찾았어요`, `${d.found} found`);
+  toast(T(d.found ? `로봇 ${d.found}대를 찾았어요` : '로봇을 못 찾았어요. 로봇이 켜져 있고 같은 와이파이인지 봐 주세요', `${d.found} robots found`), d.found ? 'ok' : 'warn', d.found ? 3500 : 6000);
+});
+$('#btn-refresh').onclick = () => guard(async () => {
+  $('#progress').hidden = false; $('#scan-bar').style.width = '0'; $('#scan-bar').parentElement.classList.remove('done');
+  $('#scan-msg').textContent = T('다시 확인 중…', 're-checking…');
+  const d = await api('/api/refresh', {});
+  $('#scan-bar').style.width = '100%'; $('#scan-bar').parentElement.classList.add('done');
+  const msg = T(`${d.ok.length}대 그대로 있어요` + (d.lost.length ? `, ${d.lost.length}대는 대답이 없어요` : ''),
+    `${d.ok.length} unchanged` + (d.lost.length ? `, ${d.lost.length} not replying` : ''));
+  $('#scan-msg').textContent = msg; toast(msg, d.lost.length ? 'warn' : 'ok');
+});
+$('#btn-apscan').onclick = () => guard(async () => {
+  $('#scan-msg').textContent = T('주변 와이파이를 살펴보는 중…', 'scanning air…'); $('#progress').hidden = false;
+  const d = await api('/api/apscan', {});
+  const n = (d.found || []).length;
+  let s = n ? T(`와이파이에 못 붙은 로봇 ${n}대: `, `${n} without wifi: `) + d.found.map((f) => f.sn).join(' ')
+    : T('모두 와이파이에 잘 붙어 있어요', 'everyone is on wifi');
+  if (d.stale) s += T('  ※ 로봇이 전에 본 것이라 조금 다를 수 있어요', '  ※ cached scan from a robot — reference only');
+  if (d.error) s += `  (${d.error})`;
+  $('#scan-msg').textContent = s; toast(s, n ? 'warn' : 'ok', 6000);
+});
+$('#btn-roster').onclick = () => guard(async () => {
+  const d = await api('/api/roster', { sns: $('#roster-text').value });
+  roster = d.status; renderRoster();
+  toast(T(`출석부에 ${d.roster.length}대 적었어요`, `saved ${d.roster.length} expected`), 'ok');
+});
+
+/* ── 코드 모드 ────────────────────────────────────────────────────── */
+function setMode(m) {
+  mode = m; try { localStorage.setItem('mode', m); } catch (e) {}
+  $$('#mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
+  $('.code-sec').classList.toggle('mode-file', m === 'file');
+  $('#filebar').hidden = m !== 'file';
+  renderButtons();
+}
+$('#mode').addEventListener('click', (e) => { const b = e.target.closest('button[data-mode]'); if (b) setMode(b.dataset.mode); });
+$('#rpath').addEventListener('input', () => { try { localStorage.setItem('rpath', $('#rpath').value); } catch (e) {} });
+$('#code').addEventListener('input', () => { try { localStorage.setItem('code', $('#code').value); } catch (e) {} });
+$('#code').addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') {
+    e.preventDefault(); const ta = e.target, s = ta.selectionStart, en = ta.selectionEnd;
+    ta.value = ta.value.slice(0, s) + '    ' + ta.value.slice(en); ta.selectionStart = ta.selectionEnd = s + 4;
   }
 });
-
-$('#out').addEventListener('click', (e) => {
-  const item = e.target.closest('.item');
-  if (!item) return;
-  const sn = item.dataset.sn;
-  const o = outputs[sn] = outputs[sn] || {};
-  o.open = !o.open;
-  if (o.open) loadFull(sn);
-  renderOut();
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !$('#btn-run').disabled) { e.preventDefault(); $('#btn-run').click(); }
 });
 
 $('#file').onchange = (e) => {
-  const f = e.target.files[0];
-  if (!f) return;
+  const f = e.target.files[0]; if (!f) return;
   const rd = new FileReader();
-  rd.onload = () => {
-    $('#code').value = rd.result;
-    if (f.name.endsWith('.sh')) $('#codetype').value = 'shell';
-  };
-  rd.readAsText(f, 'utf-8');
+  rd.onload = () => { $('#code').value = rd.result; if (f.name.endsWith('.sh')) $('#codetype').value = 'shell'; $('#code').dispatchEvent(new Event('input')); };
+  rd.readAsText(f, 'utf-8'); e.target.value = '';
 };
+async function loadExamples() {
+  try {
+    const d = await api('/api/examples');
+    const sel = $('#examples');
+    (d.examples || []).forEach((ex, i) => { const o = document.createElement('option'); o.value = String(i); o.textContent = ex.title; sel.appendChild(o); });
+    sel.onchange = () => {
+      const ex = (d.examples || [])[+sel.value]; if (!ex) return;
+      $('#code').value = ex.code; $('#codetype').value = ex.codetype; $('#code').dispatchEvent(new Event('input'));
+      sel.value = ''; toast(T(`예제를 넣었어요: ${ex.name}`, `example loaded: ${ex.name}`), 'ok', 2000);
+    };
+  } catch (e) { /* 예제가 없어도 된다 */ }
+}
 
-$('#btn-run').onclick = () => guard('#run-msg', async () => {
-  msg('#run-msg', T('던지는 중…', 'sending…'));
-  await api('/api/run', {
-    targets: targets(), code: $('#code').value, codetype: $('#codetype').value,
-  });
+/* ── 실행 ─────────────────────────────────────────────────────────── */
+$('#btn-run').onclick = () => guard(async () => {
+  const tg = targets(); if (!tg.length) return;
+  if (mode === 'file') {
+    const path = $('#rpath').value.trim();
+    if (!path || path.endsWith('/')) throw new Error(T('파일 위치를 적어 주세요 (예: /home/pi/code/main.py)', 'enter a file path'));
+    $('#run-msg').textContent = T('보내는 중…', 'sending…');
+    await api('/api/run_path', { targets: tg, path });
+  } else {
+    $('#run-msg').textContent = T('보내는 중…', 'sending…');
+    await api('/api/run', { targets: tg, code: $('#code').value, codetype: $('#codetype').value });
+  }
+});
+$('#btn-sync').onclick = () => guard(async () => {
+  const tg = targets(); if (!tg.length) return;
+  let code = $('#code').value;
+  if (mode === 'file') {
+    // 로봇의 파일을 동시 실행하려면 내용을 알아야 GO 래퍼로 감쌀 수 있다.
+    // 첫 로봇에서 읽어와 전부에 밀어넣는다.
+    const path = $('#rpath').value.trim();
+    if (!path || path.endsWith('/')) throw new Error(T('파일 위치를 적어 주세요', 'enter a file path'));
+    const d = await api('/api/load', { sn: firstTarget(), path });
+    if (d.codetype === 'shell') throw new Error(T('다 같이 시작은 파이썬 파일만 돼요', 'sync run is Python only'));
+    code = d.code;
+    toast(T(`${firstTarget()} 로봇의 ${d.filepath} 를 읽어서 다 같이 시작해요`, `read ${d.filepath} from ${firstTarget()} for sync run`), '', 4000);
+  }
+  $('#run-msg').textContent = T('준비 중…', 'preparing…');
+  await api('/api/sync', { targets: tg, code });
+});
+$('#btn-stop').onclick = () => guard(async () => {
+  await api('/api/stop', { targets: targets() }); busy = false; renderButtons(); renderStrip();
+});
+$('#btn-pull').onclick = () => guard(async () => {
+  const sn = firstTarget(); if (!sn) return;
+  const path = $('#rpath').value.trim();
+  if (!path || path.endsWith('/')) throw new Error(T('파일 위치를 적어 주세요', 'enter a file path'));
+  const d = await api('/api/load', { sn, path });
+  $('#code').value = d.code; $('#codetype').value = d.codetype; $('#code').dispatchEvent(new Event('input'));
+  setMode('new');
+  toast(T(`${sn} 로봇의 ${d.filepath} 를 코드 창에 넣었어요`, `pulled ${d.filepath} from ${sn}`), 'ok');
 });
 
-$('#btn-sync').onclick = () => guard('#run-msg', async () => {
-  msg('#run-msg', T('준비 중…', 'preparing…'));
-  await api('/api/sync', { targets: targets(), code: $('#code').value });
+/* ── 출력 ─────────────────────────────────────────────────────────── */
+$('#out').addEventListener('click', (e) => {
+  const item = e.target.closest('.item'); if (!item) return;
+  const o = outputs[item.dataset.sn] = outputs[item.dataset.sn] || {};
+  o.open = !o.open; if (o.open && o.full == null) loadFull(item.dataset.sn); renderOut();
 });
+$('#btn-expand').onclick = () => {
+  const sns = Object.keys(outputs), open = !sns.some((s) => outputs[s].open);
+  sns.forEach((s) => { outputs[s].open = open; if (open && outputs[s].full == null) loadFull(s); }); renderOut();
+};
+$('#btn-clear').onclick = () => { if (!busy) { outputs = {}; $('#run-msg').textContent = ''; renderOut(); render(); } };
 
-$('#btn-stop').onclick = () => guard('#run-msg', async () => {
-  await api('/api/stop', { targets: targets() });
-  busy = false;
-  renderButtons();
-});
-
-$('#btn-export').onclick = () => guard('#scan-msg', async () => {
+/* ── 내보내기 / 가져오기 ──────────────────────────────────────────── */
+$('#btn-export').onclick = () => guard(async () => {
   const d = await api('/api/export');
-  const blob = new Blob([JSON.stringify(d, null, 1)], { type: 'application/json' });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'pibo-fleet.json';
-  a.click();
-  URL.revokeObjectURL(a.href);
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 1)], { type: 'application/json' }));
+  a.download = `pibo-fleet-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(a.href);
 });
-
 $('#btn-import').onclick = () => {
-  const inp = document.createElement('input');
-  inp.type = 'file'; inp.accept = '.json';
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json';
   inp.onchange = () => {
     const f = inp.files[0]; if (!f) return;
     const rd = new FileReader();
-    rd.onload = () => guard('#scan-msg', async () => {
+    rd.onload = () => guard(async () => {
       const d = await api('/api/import', { payload: JSON.parse(rd.result), merge: true });
-      msg('#scan-msg', T(`${d.imported}대 가져옴`, `${d.imported} imported`), 'ok');
+      toast(T(`로봇 ${d.imported}대를 불러왔어요`, `${d.imported} imported`), 'ok');
     });
     rd.readAsText(f, 'utf-8');
   };
   inp.click();
 };
 
-$('#btn-rules').onclick = () => guard('#scan-msg', async () => {
-  const d = await api('/api/rules');
-  const cur = JSON.stringify(d.rules.os_contains, null, 1);
-  const next = prompt(T(
-    'OS_VERSION 판별 규칙 (조각 → 기종). 긴 조각을 먼저 본다.\n' +
-    '값은 pibo 또는 pibrain.',
-    'OS_VERSION rules (fragment → kind). Longer fragments win.\nValue is pibo or pibrain.'), cur);
-  if (next === null) return;
-  const parsed = JSON.parse(next);
-  await api('/api/rules', { rules: Object.assign({}, d.rules, { os_contains: parsed }) });
-  msg('#scan-msg', T('규칙 저장 · 목록 다시 매김', 'rules saved · fleet reclassified'), 'ok');
+/* ── 판별 규칙 모달 ───────────────────────────────────────────────── */
+let rulesAll = null;
+function ruleRow(frag = '', kind = 'pibo') {
+  const div = document.createElement('div'); div.className = 'rule';
+  div.innerHTML = `<input type="text" value="${esc(frag)}" placeholder="${T('버전 이름에 들어가는 글자', 'fragment')}" spellcheck="false">
+    <select><option value="pibo" ${kind === 'pibo' ? 'selected' : ''}>Pibo</option><option value="pibrain" ${kind === 'pibrain' ? 'selected' : ''}>PiBrain</option></select>
+    <button class="x" title="${T('지우기', 'remove')}">×</button>`;
+  div.querySelector('.x').onclick = () => div.remove();
+  return div;
+}
+$('#btn-rules').onclick = () => guard(async () => {
+  const d = await api('/api/rules'); rulesAll = d.rules;
+  const box = $('#rules-rows'); box.innerHTML = '';
+  Object.entries(d.rules.os_contains || {}).sort((a, b) => b[0].length - a[0].length).forEach(([f, k]) => box.appendChild(ruleRow(f, k)));
+  $('#rules-path').textContent = d.path || '';
+  $('#rules-modal').hidden = false;
+});
+$('#rules-add').onclick = () => { $('#rules-rows').appendChild(ruleRow('', 'pibo')); $('#rules-rows').lastChild.querySelector('input').focus(); };
+$('#rules-cancel').onclick = () => { $('#rules-modal').hidden = true; };
+$('#rules-save').onclick = () => guard(async () => {
+  const os_contains = {};
+  $$('#rules-rows .rule').forEach((r) => { const f = r.querySelector('input').value.trim().toLowerCase(); if (f) os_contains[f] = r.querySelector('select').value; });
+  if (!Object.keys(os_contains).length) throw new Error(T('글자를 하나는 넣어야 해요', 'no fragments'));
+  await api('/api/rules', { rules: Object.assign({}, rulesAll || {}, { os_contains }) });
+  $('#rules-modal').hidden = true; toast(T('저장했어요. 로봇 종류를 다시 나눴어요', 'rules saved · fleet reclassified'), 'ok');
 });
 
+/* ── 로봇 파일 찾아보기 모달 ──────────────────────────────────────── */
+let bPath = ROBOT_HOME, bPick = '';
+const ICON_DIR = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const ICON_FILE = '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>';
+const ICON_UP = '<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+
+function renderBrowseRobots() {
+  const sel = $('#browse-robot'), cur = sel.value;
+  const ups = fleet.filter(isUp);
+  sel.innerHTML = ups.map((r) => `<option value="${r.sn}">${esc(r.name ? `${r.name} · ${r.sn}` : r.sn)} — ${r.ip}</option>`).join('');
+  if (cur && ups.some((r) => r.sn === cur)) sel.value = cur; else if (firstTarget()) sel.value = firstTarget();
+}
+async function browse(path) {
+  const sn = $('#browse-robot').value; if (!sn) return;
+  const list = $('#browse-list'); list.innerHTML = `<div class="msg">${T('불러오는 중…', 'loading…')}</div>`;
+  bPick = ''; $('#browse-pick').disabled = true;
+  try {
+    const d = await api('/api/browse', { sn, path });
+    bPath = d.path || path;
+    const parts = bPath.split('/').filter(Boolean);
+    $('#browse-path').innerHTML = '<a data-p="/">/</a>' + parts.map((p, i) => `<a data-p="/${parts.slice(0, i + 1).join('/')}">${esc(p)}</a>/`).join('');
+    const ents = d.entries || [];
+    list.innerHTML = (bPath !== '/' ? `<div class="ent folder" data-up="1">${ICON_UP}<span>..</span></div>` : '') +
+      ents.map((e) => `<div class="ent ${e.type} ${e.protect ? 'protect' : ''}" data-name="${esc(e.name)}" data-type="${e.type}">
+        ${e.type === 'folder' ? ICON_DIR : ICON_FILE}<span>${esc(e.name)}</span>${e.protect ? `<span class="tag">${T('보호됨', 'protected')}</span>` : ''}</div>`).join('') ||
+      `<div class="msg">${T('빈 폴더예요', 'empty folder')}</div>`;
+  } catch (e) { list.innerHTML = `<div class="msg bad">${esc(e.message)}</div>`; }
+}
+$('#btn-browse').onclick = () => {
+  renderBrowseRobots(); $('#browse-modal').hidden = false;
+  const cur = $('#rpath').value.trim();
+  browse(cur && cur.startsWith('/') ? cur.replace(/\/[^/]*$/, '') || '/' : ROBOT_HOME);
+};
+$('#browse-robot').onchange = () => browse(bPath);
+$('#browse-path').addEventListener('click', (e) => { const a = e.target.closest('a[data-p]'); if (a) browse(a.dataset.p); });
+$('#browse-list').addEventListener('click', (e) => {
+  const ent = e.target.closest('.ent'); if (!ent) return;
+  if (ent.dataset.up) return browse(bPath.replace(/\/[^/]*$/, '') || '/');
+  const full = (bPath === '/' ? '' : bPath) + '/' + ent.dataset.name;
+  if (ent.dataset.type === 'folder') return browse(full);
+  $$('#browse-list .ent').forEach((x) => x.classList.remove('sel')); ent.classList.add('sel');
+  bPick = full; $('#browse-pick').disabled = false;
+});
+$('#browse-list').addEventListener('dblclick', (e) => { const ent = e.target.closest('.ent.file'); if (ent && bPick) $('#browse-pick').click(); });
+$('#browse-pick').onclick = () => { if (!bPick) return; $('#rpath').value = bPick; $('#rpath').dispatchEvent(new Event('input')); $('#browse-modal').hidden = true; };
+$('#browse-cancel').onclick = () => { $('#browse-modal').hidden = true; };
+$$('.modal').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m) m.hidden = true; }));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $$('.modal').forEach((m) => { m.hidden = true; }); });
+
+/* ── 헤더 ─────────────────────────────────────────────────────────── */
+$('#theme').onclick = () => applyTheme(currentDark() ? 'light' : 'dark');
 $('#lang').onclick = () => {
   LANG = LANG === 'en' ? 'ko' : 'en';
-  const u = new URL(location.href);
-  if (LANG === 'en') u.searchParams.set('lang', 'en'); else u.searchParams.delete('lang');
-  history.replaceState(null, '', u);
-  applyLang();
+  const u = new URL(location.href); if (LANG === 'en') u.searchParams.set('lang', 'en'); else u.searchParams.delete('lang');
+  history.replaceState(null, '', u); applyLang();
 };
 
 /* ── 시작 ─────────────────────────────────────────────────────────── */
-captureKo();
-applyLang();
-connect();
+captureKo(); applyLang(); setMode(mode); connect(); loadExamples();
 api('/api/fleet').then((d) => {
-  fleet = d.robots || [];
-  roster = d.roster;
+  fleet = d.robots || []; roster = d.roster;
   $('#roster-text').value = (d.roster_list || []).join(' ');
+  // 목록에서 사라진 로봇은 선택에서도 뺀다
+  selected = new Set(Array.from(selected).filter((s) => fleet.some((r) => r.sn === s)));
   render();
 }).catch(() => {});
 setInterval(() => { if (ws && ws.readyState === 1) ws.send('ping'); }, 20000);

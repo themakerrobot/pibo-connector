@@ -15,6 +15,10 @@ CODEPATH = "/home/pi/code/_fleet.py"
 
 SYNC_MARK = "# --- GO ---"
 
+# IDE 의 작업 폴더 (ide/run_ide.py 의 PATH). [찾아보기] 의 시작점이고,
+# 상대 경로로 파일을 실행하면 여기 기준이다.
+ROBOT_HOME = "/home/pi/code"
+
 # 기본 서버 설정
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8900
@@ -36,6 +40,13 @@ def resource_dir() -> Path:
 
 def static_dir() -> Path:
     return resource_dir() / "static"
+
+
+def examples_dir() -> Path:
+    """화면의 [예제] 메뉴가 읽는 곳. 실행 파일에는 spec 의 datas 로 같이 묶인다."""
+    if frozen():
+        return resource_dir() / "examples"
+    return Path(__file__).resolve().parent.parent / "examples"
 
 
 def data_dir() -> Path:

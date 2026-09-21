@@ -4,25 +4,32 @@
     pip install -r requirements.txt pyinstaller
     pyinstaller build/pibo-connector.spec --noconfirm
 
-정적 파일은 반드시 config.static_dir() 이 보는 자리에 풀어야 한다.
-frozen 일 때 그 자리는 sys._MEIPASS/static 이다 — 아래 datas 의 대상이
-'static' 인 이유다. 'pibo_connector/static' 으로 넣으면 실행 파일이
-StaticFiles 에서 'Directory does not exist' 로 죽는다.
+번들에 들어가는 데이터는 config.py 가 보는 자리에 정확히 풀어야 한다.
+frozen 일 때 그 자리는 sys._MEIPASS 바로 아래다:
+    static/    ← config.static_dir()
+    examples/  ← config.examples_dir()
+'pibo_connector/static' 처럼 한 단계 더 넣으면 실행 파일이
+StaticFiles 에서 'Directory does not exist' 로 죽는다. 실제로 한 번 그랬다.
+tests/smoke.py 가 이 대응이 맞는지 매번 확인한다.
 
 윈도우에서는 console=True 로 둔다. 주소와 토큰이 콘솔에 찍혀야 하고,
 스캔이 도는 동안 멈춘 것처럼 보이지 않는다.
 """
 
 import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(os.path.abspath(SPECPATH)).parent
 STATIC = ROOT / "pibo_connector" / "static"
+EXAMPLES = ROOT / "examples"
+ICON = ROOT / "build" / "pibo-connector.ico"    # build/make_icon.py 가 만든다
 
-if not STATIC.is_dir():
-    raise SystemExit(f"정적 파일 디렉토리가 없다: {STATIC}")
+for d in (STATIC, EXAMPLES):
+    if not d.is_dir():
+        raise SystemExit(f"번들할 디렉토리가 없다: {d}")
 
 # uvicorn 과 engineio 는 런타임에 이름으로 모듈을 찾는다. 통째로 넣는다.
 hidden = []
@@ -44,7 +51,7 @@ a = Analysis(
     [str(ROOT / "run.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[(str(STATIC), "static")],
+    datas=[(str(STATIC), "static"), (str(EXAMPLES), "examples")],
     hiddenimports=sorted(set(hidden)),
     hookspath=[],
     runtime_hooks=[],
@@ -67,5 +74,6 @@ exe = EXE(
     upx=False,
     console=True,
     disable_windowed_traceback=False,
-    icon=None,
+    # .ico 는 윈도우용이다. 맥은 .icns 를 원하고 리눅스는 무시한다.
+    icon=str(ICON) if (sys.platform == "win32" and ICON.exists()) else None,
 )

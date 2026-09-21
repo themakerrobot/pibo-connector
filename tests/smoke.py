@@ -127,6 +127,41 @@ def test_wrap():
     check("중괄호가 든 코드도 통과", ok2)
 
 
+def test_launcher():
+    """로봇에 있는 파일을 그 자리에서 실행하는 런처. 경로 이스케이프가 핵심이다."""
+    print("로봇 파일 런처")
+    code, kind = runner.launcher_for("dance.py")
+    check("상대 경로는 ROBOT_HOME 기준", "_p = '/home/pi/code/dance.py'" in code, code)
+    check("파이썬은 runpy __main__", kind == "python" and "run_name='__main__'" in code)
+    try:
+        ast.parse(code); ok = True
+    except SyntaxError:
+        ok = False
+    check("런처가 파이썬 문법에 맞는다", ok)
+
+    weird = "/home/pi/code/it's here/a b.py"
+    code, _ = runner.launcher_for(weird)
+    try:
+        ast.parse(code); ok = True
+    except SyntaxError:
+        ok = False
+    check("따옴표·공백 든 경로도 파이썬 런처 통과", ok and repr(weird) in code)
+
+    code, kind = runner.launcher_for("/home/pi/code/it's here/run.sh")
+    check("셸은 sh 로", kind == "shell" and "exec sh" in code)
+    check("셸 한따옴표 이스케이프", "it'\\''s here" in code, code)
+    check("없는 파일은 [missing]", "[missing]" in code)
+
+    code, _ = runner.launcher_for("../code/x.py")
+    check("normpath 로 정리", "_p = '/home/pi/code/x.py'" in code, code)
+
+    try:
+        runner.launcher_for("   "); ok = False
+    except ValueError:
+        ok = True
+    check("빈 경로는 거부", ok)
+
+
 def test_spec_paths():
     """spec 이 정적 파일을 푸는 자리와 config.static_dir() 이 보는 자리가 같은가.
 
@@ -137,8 +172,8 @@ def test_spec_paths():
     spec = (ROOT / "build" / "pibo-connector.spec").read_text(encoding="utf-8")
     # frozen 일 때 static_dir() 은 sys._MEIPASS / 'static' 이다.
     # 그러므로 datas 의 대상도 'static' 이어야 한다.
-    check("spec 의 datas 대상이 'static'",
-          'datas=[(str(STATIC), "static")]' in spec,
+    check("spec 의 datas 에 (STATIC → 'static')",
+          '(str(STATIC), "static")' in spec,
           [l for l in spec.splitlines() if "datas=" in l])
     check("static_dir 이 resource_dir 바로 아래",
           config.static_dir().name == "static"
@@ -146,6 +181,11 @@ def test_spec_paths():
     check("정적 파일이 실제로 있다",
           (config.static_dir() / "index.html").exists()
           and (config.static_dir() / "app.js").exists())
+    check("spec 의 datas 에 examples 도 있다",
+          '(str(EXAMPLES), "examples")' in spec)
+    check("examples_dir 이 resource_dir 바로 아래 (frozen 기준)",
+          config.examples_dir().name == "examples")
+    check("예제가 실제로 있다", (config.examples_dir() / "hello.py").exists())
 
 
 def test_server():
@@ -166,8 +206,12 @@ def test_server():
         try:
             st, html = srv.get("/", 5)
             check("화면이 나온다", st == 200 and "pibo-connector" in html)
-            # codepath 를 UI 에 노출하지 않는다 (executeb 에 is_protect 가 없다)
-            check("화면에 codepath 입력칸이 없다", "/home/pi/code" not in html)
+            # codepath(_fleet.py) 를 UI 에 노출하지 않는다 (executeb 에 is_protect 가 없다).
+            # /home/pi/code 폴더 자체는 [로봇 안의 파일] 의 기본 위치라 화면에 있어도 된다.
+            check("화면에 codepath 가 없다",
+                  config.CODEPATH not in html and "_fleet" not in html)
+            check("화면에 codepath 를 바꾸는 입력칸이 없다",
+                  'name="codepath"' not in html and 'id="codepath"' not in html)
         except Exception as ex:
             check("화면이 나온다", False, str(ex))
         try:
@@ -180,7 +224,7 @@ def test_server():
 def main() -> int:
     utf8_console(sys.stdout, sys.stderr)
     for fn in (test_parse_system, test_detect, test_store, test_ap_rx,
-               test_wrap, test_spec_paths, test_server):
+               test_wrap, test_launcher, test_spec_paths, test_server):
         fn()
     print()
     if FAIL:
