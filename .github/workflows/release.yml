@@ -1,9 +1,12 @@
 name: release
 
-# exe 자동 배포.
+# 실행 파일 자동 배포.
 #   - v* 태그를 밀면  → 그 태그로 정식 릴리스
-#   - main 에 push    → 'nightly' 선릴리스를 덮어쓴다 (항상 최신 exe 가 한 주소에)
+#   - main 에 push    → 'nightly' 선릴리스를 덮어쓴다 (항상 최신이 한 주소에)
 #   - 수동 실행       → 태그 이름을 직접 줘서 다시 올린다
+#
+# 어느 경로든 '실제로 떠서 화면을 주는지' 를 통과한 것만 올라간다.
+# 안 뜨는 실행 파일을 올리면 교실에서야 알게 된다.
 
 on:
   push:
@@ -46,6 +49,8 @@ jobs:
           pip install -r requirements.txt pyinstaller
       - name: 빌드
         run: pyinstaller build/pibo-connector.spec --noconfirm
+      - name: 실제로 뜨는지 (이걸 통과해야 올린다)
+        run: python tests/exe_smoke.py ${{ matrix.built }} --port 8912 --timeout 120
       - name: 이름 붙이기
         shell: bash
         run: |
@@ -102,6 +107,8 @@ jobs:
             | Windows | `pibo-connector-windows.exe` |
             | Linux | `pibo-connector-linux` (`chmod +x` 후 실행) |
             | macOS | `pibo-connector-macos` (`chmod +x`, 첫 실행은 우클릭 → 열기) |
+
+            세 벌 모두 CI 에서 실제로 띄워 `/api/info` 와 화면이 나오는 것까지 확인했다.
 
             소스로 돌리려면: `pip install -r requirements.txt && python run.py`
 

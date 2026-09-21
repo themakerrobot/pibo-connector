@@ -1,7 +1,7 @@
 name: build
 
-# 소스가 도는지, exe 로 묶이는지를 push 마다 본다.
-# 실제 배포는 release.yml 이 맡는다.
+# 소스가 도는지, 묶은 실행 파일이 실제로 뜨는지를 push 마다 본다.
+# 배포는 release.yml 이 맡는다.
 
 on:
   push:
@@ -28,7 +28,15 @@ jobs:
 
   exe:
     needs: check
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            built: dist/pibo-connector.exe
+          - os: ubuntu-latest
+            built: dist/pibo-connector
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,21 +46,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
       - run: pyinstaller build/pibo-connector.spec --noconfirm
-      - name: exe 가 실제로 뜨는지
-        shell: pwsh
-        run: |
-          $p = Start-Process -FilePath dist/pibo-connector.exe `
-               -ArgumentList "--no-browser","--port","8912" -PassThru
-          Start-Sleep -Seconds 12
-          try {
-            $r = Invoke-WebRequest -Uri http://127.0.0.1:8912/api/info -UseBasicParsing -TimeoutSec 10
-            if ($r.StatusCode -ne 200) { throw "status $($r.StatusCode)" }
-            Write-Host $r.Content
-          } finally {
-            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-          }
+      - name: 묶은 실행 파일이 실제로 뜨는지
+        run: python tests/exe_smoke.py ${{ matrix.built }} --port 8912 --timeout 120
       - uses: actions/upload-artifact@v4
         with:
-          name: pibo-connector-windows
-          path: dist/pibo-connector.exe
+          name: pibo-connector-${{ matrix.os }}
+          path: ${{ matrix.built }}
           retention-days: 14
