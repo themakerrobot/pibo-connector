@@ -68,6 +68,27 @@ def main() -> int:
 
         out = srv.log().strip()
 
+    # 윈도우: 버전 정보 리소스. 속성 창 '자세히' 에 회사·제품·버전이 떠야 한다.
+    if sys.platform == "win32":
+        try:
+            import pefile
+            from pibo_connector import __version__
+            pe = pefile.PE(str(exe), fast_load=True)
+            pe.parse_data_directories()
+            got = ""
+            for fi in getattr(pe, "FileInfo", []):
+                for entry in fi:
+                    if entry.Key == b"StringFileInfo":
+                        for st in entry.StringTable:
+                            got = st.entries.get(b"ProductVersion", b"").decode("utf-8", "replace")
+            if got == __version__:
+                print(f"ok  VERSIONINFO ProductVersion={got}")
+            else:
+                print(f"!! VERSIONINFO 가 없거나 버전이 다르다: '{got}' (기대 {__version__})")
+                fails.append("VERSIONINFO")
+        except ImportError:
+            print("(pefile 없음 — VERSIONINFO 검사 생략)")
+
     if out or fails:
         print("─── 실행 파일 출력 " + "─" * 40)
         print(out or "(출력 없음)")

@@ -152,6 +152,9 @@ jobs:
 
             세 벌 모두 CI 에서 실제로 띄워 `/api/info` 와 화면이 나오는 것까지 확인했다.
 
+            **처음 실행할 때 "Windows의 PC 보호" 가 뜨면** → `추가 정보` → `실행`. 그 PC 에서는 한 번이면 된다.
+            (서명 없는 새 파일이라 Windows 가 묻는 것. 파일 속성 맨 아래 `차단 해제` 를 체크해도 된다.)
+
             소스로 돌리려면: `pip install -r requirements.txt && python run.py`
 
             커밋 `${{ github.sha }}`

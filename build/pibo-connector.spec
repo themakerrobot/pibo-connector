@@ -23,6 +23,8 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(os.path.abspath(SPECPATH)).parent
+sys.path.insert(0, str(ROOT))
+from pibo_connector import __version__   # noqa: E402  — 태그 가드와 같은 값
 STATIC = ROOT / "pibo_connector" / "static"
 EXAMPLES = ROOT / "examples"
 ICON = ROOT / "build" / "pibo-connector.ico"    # sense-lab 의 파이보 얼굴 (tools/portable/icon.ico) 그대로
@@ -46,6 +48,34 @@ hidden += [
     "engineio.async_drivers.aiohttp",
     "engineio.async_drivers.asgi",
 ]
+
+def win_version_info():
+    """exe 속성 창의 '자세히' 탭. 서명은 아니지만 정체를 밝힌다 —
+    SmartScreen 의 '알 수 없는 게시자' 판정을 없애지는 못한다."""
+    if sys.platform != "win32":
+        return None
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo,
+        VarStruct, VSVersionInfo)
+    nums = [int(x) for x in __version__.split(".")[:3]] + [0]
+    nums = tuple(nums[:4])
+    return VSVersionInfo(
+        ffi=FixedFileInfo(filevers=nums, prodvers=nums, mask=0x3F, flags=0x0,
+                          OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+        kids=[
+            StringFileInfo([StringTable("040904B0", [
+                StringStruct("CompanyName", "Circulus"),
+                StringStruct("ProductName", "파이보 커넥터 (pibo-connector)"),
+                StringStruct("FileDescription", "파이보 커넥터 — 파이보/파이브레인 여러 대를 브라우저로 찾고 실행"),
+                StringStruct("FileVersion", __version__),
+                StringStruct("ProductVersion", __version__),
+                StringStruct("OriginalFilename", "pibo-connector.exe"),
+                StringStruct("InternalName", "pibo-connector"),
+                StringStruct("LegalCopyright", "© Circulus"),
+            ])]),
+            VarFileInfo([VarStruct("Translation", [0x0409, 1200])]),
+        ])
+
 
 a = Analysis(
     [str(ROOT / "run.py")],
@@ -76,4 +106,5 @@ exe = EXE(
     disable_windowed_traceback=False,
     # .ico 는 윈도우용이다. 맥은 .icns 를 원하고 리눅스는 무시한다.
     icon=str(ICON) if (sys.platform == "win32" and ICON.exists()) else None,
+    version=win_version_info(),
 )
