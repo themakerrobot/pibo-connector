@@ -135,42 +135,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release delete nightly --cleanup-tag --yes || true
+      - name: 릴리스 노트 만들기 (CHANGELOG.md 에서)
+        id: notes
+        run: |
+          python build/release_notes.py --tag "${{ steps.tag.outputs.name }}" \
+                                        --sha "${{ github.sha }}" --out notes.md
+          echo "title=$(python build/release_notes.py --tag "${{ steps.tag.outputs.name }}" --title)" >> "$GITHUB_OUTPUT"
+          echo "─── 릴리스 본문 ───"; cat notes.md
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
-          name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.notes.outputs.title }}
           prerelease: ${{ steps.tag.outputs.pre }}
-          generate_release_notes: ${{ steps.tag.outputs.pre == 'false' }}
-          body: |
-            ## 파이보 커넥터 ${{ steps.tag.outputs.name }}
-
-            교실의 파이보·파이브레인을 브라우저 한 장으로 찾고, 같은 코드를 한 번에 실행해요.
-            노트북에 아무것도 설치하지 않아요. 아래 파일 하나만 받으면 돼요.
-
-            ### 1. 받기
-
-            | 노트북 | 아래 **Assets** 에서 받을 파일 |
-            |---|---|
-            | **Windows** | `pibo-connector-windows.exe` |
-            | macOS | `pibo-connector-macos` — 터미널에서 `chmod +x` 한 뒤, 첫 실행은 우클릭 → 열기 |
-            | Linux | `pibo-connector-linux` — `chmod +x` 한 뒤 실행 |
-
-            ### 2. 실행하기
-
-            1. 받은 파일을 더블클릭해요.
-            2. **"Windows의 PC 보호"** 창이 뜨면 → **추가 정보** → **실행**. 그 PC 에서는 한 번이면 돼요.
-            3. 검은 창이 하나 뜨고, 잠시 뒤 브라우저가 열려요. **검은 창은 닫지 마세요** — 닫으면 꺼져요.
-            4. 로봇과 노트북이 **같은 와이파이**에 있는지 확인하고 [로봇 찾기] 를 누르세요.
-
-            ### 잘 안 될 때
-
-            - **로봇이 안 찾아져요** → 로봇이 켜져 있고 노트북과 같은 와이파이인지 봐요. 5초쯤 기다렸다 한 번 더 눌러요.
-            - **브라우저가 안 열려요** → 검은 창에 적힌 주소(보통 `http://127.0.0.1:8900/`)를 브라우저에 직접 넣어요.
-
-            <details><summary>개발자용</summary>
-
-            소스로 돌리려면 `pip install -r requirements.txt && python run.py`.
-            세 파일 모두 CI 에서 실제로 띄워 화면·폰트·이미지까지 나오는 것을 확인한 빌드예요.
-            커밋 `${{ github.sha }}`
-            </details>
+          body_path: notes.md
           files: out/*

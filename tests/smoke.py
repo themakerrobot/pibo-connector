@@ -162,6 +162,26 @@ def test_launcher():
     check("빈 경로는 거부", ok)
 
 
+def test_release_notes():
+    """지금 __version__ 에 해당하는 CHANGELOG 절이 있는가.
+
+    없으면 태그를 찍는 순간 릴리스 워크플로가 멈춘다. 여기서 먼저 잡는다.
+    """
+    print("릴리스 노트")
+    sys.path.insert(0, str(ROOT / "build"))
+    import release_notes
+    from pibo_connector import __version__ as ver
+    sec = release_notes.section_for("v" + ver)
+    check(f"CHANGELOG 에 v{ver} 절이 있다", bool(sec),
+          f"CHANGELOG.md 맨 위에 '## v{ver} — 날짜' 절을 더할 것")
+    if sec:
+        body = release_notes.build("v" + ver, "deadbeef")
+        check("본문에 바뀐 내용이 들어간다", sec.splitlines()[0] in body)
+        check("본문에 받기·실행 안내가 있다", "### 받기" in body and "### 실행하기" in body)
+        check("제목", release_notes.title_for("v" + ver) == f"파이보 커넥터 v{ver}")
+    check("nightly 는 CHANGELOG 없이도 된다", "시험용" in release_notes.build("nightly", "x"))
+
+
 def test_spec_paths():
     """spec 이 정적 파일을 푸는 자리와 config.static_dir() 이 보는 자리가 같은가.
 
@@ -231,7 +251,8 @@ def test_server():
 def main() -> int:
     utf8_console(sys.stdout, sys.stderr)
     for fn in (test_parse_system, test_detect, test_store, test_ap_rx,
-               test_wrap, test_launcher, test_spec_paths, test_server):
+               test_wrap, test_launcher, test_release_notes, test_spec_paths,
+               test_server):
         fn()
     print()
     if FAIL:
