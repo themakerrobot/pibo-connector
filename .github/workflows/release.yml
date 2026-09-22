@@ -142,20 +142,36 @@ jobs:
           prerelease: ${{ steps.tag.outputs.pre }}
           generate_release_notes: ${{ steps.tag.outputs.pre == 'false' }}
           body: |
-            파이썬 없는 노트북에서 그대로 실행된다. 받아서 더블클릭하면 브라우저가 열린다.
+            ## 파이보 커넥터 ${{ steps.tag.outputs.name }}
 
-            | 노트북 | 받을 파일 |
+            교실의 파이보·파이브레인을 브라우저 한 장으로 찾고, 같은 코드를 한 번에 실행해요.
+            노트북에 아무것도 설치하지 않아요. 아래 파일 하나만 받으면 돼요.
+
+            ### 1. 받기
+
+            | 노트북 | 아래 **Assets** 에서 받을 파일 |
             |---|---|
-            | Windows | `pibo-connector-windows.exe` |
-            | Linux | `pibo-connector-linux` (`chmod +x` 후 실행) |
-            | macOS | `pibo-connector-macos` (`chmod +x`, 첫 실행은 우클릭 → 열기) |
+            | **Windows** | `pibo-connector-windows.exe` |
+            | macOS | `pibo-connector-macos` — 터미널에서 `chmod +x` 한 뒤, 첫 실행은 우클릭 → 열기 |
+            | Linux | `pibo-connector-linux` — `chmod +x` 한 뒤 실행 |
 
-            세 벌 모두 CI 에서 실제로 띄워 `/api/info` 와 화면이 나오는 것까지 확인했다.
+            ### 2. 실행하기
 
-            **처음 실행할 때 "Windows의 PC 보호" 가 뜨면** → `추가 정보` → `실행`. 그 PC 에서는 한 번이면 된다.
-            (서명 없는 새 파일이라 Windows 가 묻는 것. 파일 속성 맨 아래 `차단 해제` 를 체크해도 된다.)
+            1. 받은 파일을 더블클릭해요.
+            2. **"Windows의 PC 보호"** 창이 뜨면 → **추가 정보** → **실행**. 그 PC 에서는 한 번이면 돼요.
+            3. 검은 창이 하나 뜨고, 잠시 뒤 브라우저가 열려요. **검은 창은 닫지 마세요** — 닫으면 꺼져요.
+            4. 로봇과 노트북이 **같은 와이파이**에 있는지 확인하고 [로봇 찾기] 를 누르세요.
 
-            소스로 돌리려면: `pip install -r requirements.txt && python run.py`
+            ### 잘 안 될 때
 
+            - **로봇이 안 찾아져요** → 로봇이 켜져 있고 노트북과 같은 와이파이인지 봐요. 5초쯤 기다렸다 한 번 더 눌러요.
+            - **브라우저가 안 열려요** → 검은 창에 적힌 주소(보통 `http://127.0.0.1:8900/`)를 브라우저에 직접 넣어요.
+            - **와이파이에 못 붙은 로봇이 있어요** → [와이파이 못 붙은 로봇] 을 누르면 누가 못 붙었는지 번호가 나와요.
+
+            <details><summary>개발자용</summary>
+
+            소스로 돌리려면 `pip install -r requirements.txt && python run.py`.
+            세 파일 모두 CI 에서 실제로 띄워 화면·폰트·이미지까지 나오는 것을 확인한 빌드예요.
             커밋 `${{ github.sha }}`
+            </details>
           files: out/*
