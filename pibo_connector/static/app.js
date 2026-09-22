@@ -9,9 +9,9 @@ const ROBOT_HOME = '/home/pi/code';
 
 /* ── 사전 ─────────────────────────────────────────────────────────── */
 const EN = {
-  title: 'Pibo Connector', up: 'on', ap: 'no wifi', selected: 'picked', conn_off: 'offline', conn_on: 'connected',
+  title: 'Pibo Connector', up: 'on', selected: 'picked', conn_off: 'offline', conn_on: 'connected',
   stp1: 'Find robots', stp2: 'Pick robots', stp3: 'Get code ready', stp4: 'Run',
-  find: 'Find robots', subnet: 'Classroom network', scan: 'Find', refresh: 'Re-check', apscan: 'Robots without wifi',
+  find: 'Find robots', subnet: 'Classroom network', scan: 'Find', refresh: 'Re-check',
   find_note: 'Looks for robots that are on. About 5 seconds.',
   roster: 'Attendance', roster_edit: 'Class list (robot numbers)', save: 'Save',
   roster_note: 'Type the 8-digit number on each robot\'s chest. Any spacing works.',
@@ -251,7 +251,6 @@ function render() {
 
 function renderStrip() {
   $('#st-up b').textContent = fleet.filter(isUp).length;
-  $('#st-ap b').textContent = fleet.filter((r) => r.mode === 'ap').length;
   $('#st-sel b').textContent = selected.size;
   const j = $('#st-job');
   if (busy) {
@@ -286,7 +285,6 @@ function renderRoster() {
   const up = roster.present || [], ap = roster.ap || [], miss = roster.missing || [], extra = roster.extra || [];
   sum.innerHTML =
     `<span class="ok"><b>${up.length}</b>/ ${roster.expected} ${T('왔어요', 'here')}</span>` +
-    `<span class="${ap.length ? 'warn' : ''}"><b>${ap.length}</b>${T('못 붙음', 'no wifi')}</span>` +
     `<span class="${miss.length ? 'warn' : ''}"><b>${miss.length}</b>${T('안 보여요', 'missing')}</span>`;
   const nm = (sn) => { const r = fleet.find((x) => x.sn === sn); return r && r.name ? `${r.name} ` : ''; };
   chips.innerHTML =
@@ -393,15 +391,6 @@ $('#btn-refresh').onclick = () => guard(async () => {
   const msg = T(`${d.ok.length}대 그대로` + (d.lost.length ? `, ${d.lost.length}대 대답 없음` : ''),
     `${d.ok.length} same` + (d.lost.length ? `, ${d.lost.length} not replying` : ''));
   progressEnd(msg); toast(msg, d.lost.length ? 'warn' : 'ok');
-});
-$('#btn-apscan').onclick = () => guard(async () => {
-  progressStart(T('주변 와이파이 보는 중…', 'scanning air…'));
-  const d = await api('api/apscan', {});
-  const n = (d.found || []).length;
-  let s = n ? T(`못 붙은 로봇 ${n}대: `, `${n} without wifi: `) + d.found.map((f) => f.sn).join(' ')
-    : T('모두 와이파이에 잘 붙어 있어요', 'everyone is on wifi');
-  if (d.stale) s += T(' ※ 조금 전 결과예요', ' ※ cached'); if (d.error) s += ` (${d.error})`;
-  progressEnd(s); toast(s, n ? 'warn' : 'ok', 4000);
 });
 $('#btn-roster').onclick = () => guard(async () => {
   const d = await api('api/roster', { sns: $('#roster-text').value });
